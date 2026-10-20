@@ -1,0 +1,182 @@
+version: '3.8'
+
+# ============================================================================
+# TEXT-TO-SQL AGENTIC DATA ANALYST - Docker Compose Configuration
+# ============================================================================
+# Local development orchestration for backend (FastAPI) and frontend (Next.js)
+#
+# Usage:
+#   docker-compose up --build          # Build and start all services
+#   docker-compose up                  # Start without rebuilding
+#   docker-compose down                # Stop all services
+#   docker-compose logs -f backend     # View backend logs
+#   docker-compose logs -f frontend    # View frontend logs
+# ============================================================================
+
+services:
+  # =========================================================================
+  # BACKEND SERVICE - FastAPI + CrewAI + BigQuery
+  # =========================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: text-to-sql-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # OpenAI Configuration
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MAX_TOKENS: ${OPENAI_MAX_TOKENS:-2000}
+      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.7}
+      OPENAI_MONTHLY_BUDGET: ${OPENAI_MONTHLY_BUDGET:-15}
+      
+      # GCP Configuration
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+      BQ_DATASET_PROJECT: ${BQ_DATASET_PROJECT:-bigquery-public-data}
+      BQ_DATASET_ID: ${BQ_DATASET_ID:-thelook_ecommerce}
+      BQ_QUERY_TIMEOUT_SECONDS: ${BQ_QUERY_TIMEOUT_SECONDS:-30}
+      BQ_MAX_RESULTS_ROWS: ${BQ_MAX_RESULTS_ROWS:-1000}
+      
+      # FastAPI Configuration
+      BACKEND_PORT: ${BACKEND_PORT:-8000}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      
+      # Logging
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENABLE_REQUEST_LOGGING: ${ENABLE_REQUEST_LOGGING:-true}
+      
+      # Caching
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-1800}
+      CACHE_MAX_RESULTS: ${CACHE_MAX_RESULTS:-10}
+    
+    volumes:
+      # Mount GCP service account key (read-only)
+      - ${GCP_KEY_PATH}:/secrets/gcp-key.json:ro
+      # Mount source code for hot-reload during development
+      - ./backend:/app
+      # Exclude venv and __pycache__ from sync
+      - /app/venv
+      - /app/__pycache__
+    
+    networks:
+      - app-network
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional, for production)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M
+
+  # =========================================================================
+  # FRONTEND SERVICE - Next.js 16
+  # =========================================================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: text-to-sql-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # API Configuration
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:8000}
+      NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-development}
+      # Next.js Configuration
+      NODE_ENV: ${ENVIRONMENT:-development}
+    
+    volumes:
+      # Mount source code for hot-reload during development
+      - ./frontend:/app
+      # Exclude node_modules and .next from sync
+      - /app/node_modules
+      - /app/.next
+    
+    networks:
+      - app-network
+    
+    # Depends on backend being ready
+    depends_on:
+      backend:
+        condition: service_healthy
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional, for production)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 512M
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 256M
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  app-network:
+    driver: bridge
+
+# ============================================================================
+# VOLUMES (Optional for persistent data)
+# ============================================================================
+# volumes:
+#   backend-cache:
+#   frontend-build:
+
+# ============================================================================
+# NOTES FOR DEVELOPERS
+# ============================================================================
+# 1. Before running docker-compose:
+#    - Copy .env.example to .env.local
+#    - Fill in OPENAI_API_KEY, GCP_PROJECT_ID, GCP_KEY_PATH
+#    - Ensure gcp-key.json exists at the path specified in GCP_KEY_PATH
+#
+# 2. Initial setup:
+#    docker-compose up --build
+#
+# 3. Subsequent runs (without code changes):
+#    docker-compose up
+#
+# 4. View logs:
+#    docker-compose logs -f backend
+#    docker-compose logs -f frontend
+#
+# 5. Access services:
+#    Frontend: http://localhost:3000
+#    Backend API: http://localhost:8000
+#    Backend Docs: http://localhost:8000/docs
+#
+# 6. Stop services:
+#    docker-compose down
+#
+# 7. Rebuild after dependency changes:
+#    docker-compose down && docker-compose up --build
+# ============================================================================
