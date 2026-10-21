@@ -1,0 +1,51 @@
+# ============================================================================
+# TEXT-TO-SQL AGENTIC DATA ANALYST - Python Dependencies
+# ============================================================================
+# Compatible with Python 3.11-3.13
+# Minimal, tested versions
+# ============================================================================
+
+# Web Framework & Server
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.6
+
+# Data Validation
+pydantic>=2.10.0
+pydantic-settings>=2.5.0
+
+# LangChain with OpenAI support
+langchain>=0.2.5
+langchain-openai>=0.1.6
+langchain-google-community>=0.1.0
+
+# Google Cloud BigQuery (latest 3.x version)
+google-cloud-bigquery>=3.46.0
+google-auth>=2.30.0
+
+# OpenAI API
+openai>=1.50.0
+
+# CrewAI (Multi-agent orchestration)
+crewai>=0.40.0
+crewai-tools>=0.4.0
+
+# Utilities
+python-dotenv>=1.0.0
+tenacity>=9.0.0
+httpx>=0.27.0
+
+# Async
+aiohttp>=3.10.0
+
+# Type support
+typing-extensions>=4.12.0
+
+# ============================================================================
+# Development & Testing
+# ============================================================================
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+black>=24.0.0
+isort>=5.13.0
+
