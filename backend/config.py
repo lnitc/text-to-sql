@@ -4,7 +4,8 @@ Environment variables are loaded from .env.local file.
 """
 
 from pydantic_settings import BaseSettings
-from typing import Literal
+from typing import Literal, Optional
+from langchain_openai import ChatOpenAI
 
 
 class Settings(BaseSettings):
@@ -65,6 +66,22 @@ class Settings(BaseSettings):
         env_file = ".env.local"
         case_sensitive = False
         extra = "ignore"  # Ignore extra environment variables
+
+    def get_llm(self):
+        """
+        Get configured LangChain ChatOpenAI instance for CrewAI.
+        
+        Returns:
+            ChatOpenAI instance configured with settings
+        """
+        return ChatOpenAI(
+            model=self.openai_model,
+            temperature=self.openai_temperature,
+            max_tokens=self.openai_max_tokens,
+            api_key=self.openai_api_key,
+            timeout=30,
+            max_retries=2,
+        )
 
 
 # Create global settings instance

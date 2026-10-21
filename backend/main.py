@@ -24,6 +24,14 @@ from backend.schemas.models import (
     ErrorResponse,
     ChartData,
 )
+from backend.agents.simplified_pipeline import create_simplified_pipeline
+
+
+# ============================================================================
+# Global Pipeline Instance (initialized on startup)
+# ============================================================================
+
+pipeline = None
 
 
 # ============================================================================
@@ -37,6 +45,8 @@ async def lifespan(app: FastAPI):
     Application lifespan context manager.
     Runs on startup and shutdown.
     """
+    global pipeline
+    
     # Startup
     print(f"Starting {settings.app_name} v{settings.app_version}")
     print(f"Environment: {settings.environment}")
@@ -45,7 +55,17 @@ async def lifespan(app: FastAPI):
     # Validate settings
     is_valid, message = validate_settings()
     if not is_valid:
-        print(f"WARNING: {message}")
+        print(f"WARNING: Settings validation failed: {message}")
+    else:
+        # Initialize pipeline
+        try:
+            print(f"Initializing Text-to-SQL pipeline for project: {settings.gcp_project_id}")
+            pipeline = create_simplified_pipeline(settings.gcp_project_id)
+            print("Text-to-SQL pipeline initialized successfully")
+        except Exception as e:
+            print(f"ERROR: Failed to initialize pipeline: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     yield
 
@@ -220,6 +240,7 @@ async def chat(request: ChatRequest) -> AgentResponse:
     Raises:
         HTTPException: If query processing fails
     """
+    global pipeline
     start_time = time.time()
 
     try:
@@ -231,32 +252,39 @@ async def chat(request: ChatRequest) -> AgentResponse:
                 detail="Query cannot be empty",
             )
 
-        # TODO: Implement CrewAI pipeline
-        # For now, return a mock response to validate the endpoint structure
-        print(f"Processing query: {user_query}")
+        # Check if pipeline is initialized
+        if pipeline is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Text-to-SQL pipeline not initialized. Check backend configuration.",
+            )
 
-        # Mock response (will be replaced with actual CrewAI pipeline in Phase 2)
-        mock_response = AgentResponse(
-            thought_process=(
-                "The user is asking a question about the dataset. "
-                "In Phase 2, this will be processed by the CrewAI pipeline. "
-                f"Query received: {user_query[:50]}..."
-            ),
-            sql_query="SELECT * FROM `bigquery-public-data.thelook_ecommerce.products` LIMIT 5",
-            chart=ChartData(
+        print(f"[Chat] Processing query: {user_query}")
+
+        # Execute pipeline asynchronously
+        result = await pipeline.execute_async(user_query)
+
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Pipeline execution failed: {result.get('error', 'Unknown error')}",
+            )
+
+        # Build response
+        response = AgentResponse(
+            thought_process=result.get("thought_process", "Analysis complete."),
+            sql_query=result.get("sql_query", ""),
+            chart=result.get("chart", ChartData(
                 chart_type="table",
-                data=[
-                    {"id": 1, "name": "Product 1", "category": "Electronics"},
-                    {"id": 2, "name": "Product 2", "category": "Clothing"},
-                ],
-                x_axis_key="id",
-                y_axis_key="name",
-                title="Sample Data (Mock Response)",
-            ),
-            execution_time_ms=(time.time() - start_time) * 1000,
+                data=[],
+                x_axis_key="x",
+                y_axis_key="y",
+                title="Results"
+            )),
+            execution_time_ms=result.get("execution_time_ms", 0),
         )
 
-        return mock_response
+        return response
 
     except HTTPException:
         raise
