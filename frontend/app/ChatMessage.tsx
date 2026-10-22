@@ -3,8 +3,9 @@
 import React, { useState } from 'react';
 import { Message } from './store';
 import { ChartRenderer } from './ChartRenderer';
-import { Copy, ChevronDown, ChevronUp, Download, FileJson, FileText } from 'lucide-react';
+import { Copy, ChevronDown, ChevronUp, Download, FileJson, FileText, Star } from 'lucide-react';
 import { downloadCSV, downloadJSON, copyToClipboard } from './utils/export';
+import { useFavorites } from './hooks/useFavorites';
 
 interface ChatMessageProps {
   message: Message;
@@ -14,6 +15,12 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const [showSql, setShowSql] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showSaveForm, setShowSaveForm] = useState(false);
+  const [newTag, setNewTag] = useState('');
+  const { toggleFavorite, getFavorites, addQuery, addTag } = useFavorites();
+
+  const favorites = getFavorites();
+  const isFavorited = message.content && favorites.some((f: any) => f.query === message.content);
 
   const handleCopySql = () => {
     if (message.agentResponse?.sql_query) {
@@ -130,8 +137,19 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         <div className="px-4 py-4">
           <div className="flex items-center justify-between mb-3">
             <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Visualization</p>
-            {/* Export Buttons */}
+            {/* Action Buttons */}
             <div className="flex gap-2">
+              <button
+                onClick={() => setShowSaveForm(!showSaveForm)}
+                className={`p-1.5 rounded transition-colors ${
+                  isFavorited
+                    ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                }`}
+                title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                <Star size={16} fill={isFavorited ? 'currentColor' : 'none'} />
+              </button>
               <button
                 onClick={handleExportCSV}
                 disabled={exporting}
@@ -157,6 +175,71 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               </button>
             </div>
           </div>
+
+          {/* Save to Favorites Form */}
+          {showSaveForm && (
+            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded">
+              <div className="space-y-2">
+                <button
+                  onClick={() => {
+                    const favorited = favorites.find((f: any) => f.query === message.content);
+                    if (favorited) {
+                      toggleFavorite(favorited.id);
+                    } else {
+                      const q = addQuery(message.content);
+                      toggleFavorite(q.id);
+                    }
+                    setShowSaveForm(false);
+                  }}
+                  className={`w-full px-3 py-2 rounded text-sm font-medium transition ${
+                    isFavorited
+                      ? 'bg-red-500 hover:bg-red-600 text-white'
+                      : 'bg-yellow-500 hover:bg-yellow-600 text-white'
+                  }`}
+                >
+                  {isFavorited ? 'Remove from Favorites' : 'Add to Favorites'}
+                </button>
+
+                {isFavorited && (
+                  <>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Add a tag..."
+                        value={newTag}
+                        onChange={e => setNewTag(e.target.value)}
+                        onKeyPress={e => {
+                          if (e.key === 'Enter' && newTag.trim()) {
+                            const favorited = favorites.find((f: any) => f.query === message.content);
+                            if (favorited) {
+                              addTag(favorited.id, newTag.trim());
+                              setNewTag('');
+                            }
+                          }
+                        }}
+                        className="flex-1 px-2 py-1 rounded text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                      />
+                      <button
+                        onClick={() => {
+                          if (newTag.trim()) {
+                            const favorited = favorites.find((f: any) => f.query === message.content);
+                            if (favorited) {
+                              addTag(favorited.id, newTag.trim());
+                              setNewTag('');
+                            }
+                          }
+                        }}
+                        className="px-3 py-1 rounded text-sm font-medium bg-blue-500 hover:bg-blue-600 text-white transition"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           <ChartRenderer chartData={message.agentResponse.chart} />
         </div>
       </div>
