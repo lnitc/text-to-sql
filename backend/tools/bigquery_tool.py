@@ -110,10 +110,13 @@ class BigQueryTool:
             query_job = self.client.query(query, job_config=query_config)
             results = query_job.result(timeout=timeout_seconds)
 
+            # Extract field names from schema
+            field_names = [field.name for field in results.schema]
+            
             # Convert results to list of dicts
             rows = []
             for row in results:
-                row_dict = {key: value for key, value in zip(results.field_names, row)}
+                row_dict = {key: value for key, value in zip(field_names, row)}
                 rows.append(row_dict)
 
                 # Safety limit
@@ -134,7 +137,7 @@ class BigQueryTool:
                 "success": True,
                 "data": rows,
                 "row_count": len(rows),
-                "schema": list(results.field_names) if results.field_names else [],
+                "schema": field_names,
                 "error": None,
                 "execution_time_ms": execution_time,
             }
