@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { Clock, Copy, Search, Star } from 'lucide-react';
-import { useFavorites, SavedQuery } from '../hooks/useFavorites';
+import { useFavorites } from '../hooks/useFavorites';
+import { SavedQuery } from '../store';
 
 interface HistoryPanelProps {
   onSelectQuery: (query: string) => void;

@@ -1,16 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
-export interface SavedQuery {
-  id: string;
-  query: string;
-  tags: string[];
-  isFavorite: boolean;
-  createdAt: Date;
-  lastUsed: Date;
-  resultCount: number;
-}
+import { useChatStore, SavedQuery } from '../store';
 
 const STORAGE_KEY = 'text-to-sql-queries';
 const MAX_HISTORY = 20;
@@ -20,7 +11,7 @@ const MAX_FAVORITES = 50;
  * Hook for managing saved queries, favorites, and history
  */
 export function useFavorites() {
-  const [queries, setQueries] = useState<SavedQuery[]>([]);
+  const { favorites, setFavorites, addFavorite, removeFavorite, updateFavorite } = useChatStore();
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load from localStorage on mount
@@ -28,6 +19,13 @@ export function useFavorites() {
     loadQueries();
     setIsLoaded(true);
   }, []);
+
+  // Save to localStorage whenever favorites change
+  useEffect(() => {
+    if (isLoaded) {
+      saveToStorage(favorites);
+    }
+  }, [favorites, isLoaded]);
 
   const loadQueries = () => {
     try {
@@ -40,7 +38,7 @@ export function useFavorites() {
           createdAt: new Date(q.createdAt),
           lastUsed: new Date(q.lastUsed),
         }));
-        setQueries(withDates);
+        setFavorites(withDates);
       }
     } catch (error) {
       console.error('Failed to load queries:', error);
@@ -67,56 +65,41 @@ export function useFavorites() {
       resultCount: 0,
     };
 
-    const updated = [newQuery, ...queries].slice(0, MAX_HISTORY);
-    setQueries(updated);
-    saveToStorage(updated);
+    addFavorite(newQuery);
     return newQuery;
   };
 
   const toggleFavorite = (id: string): boolean => {
-    const updated = queries.map((q) =>
-      q.id === id ? { ...q, isFavorite: !q.isFavorite } : q
-    );
-
-    // Ensure we don't exceed max favorites
-    const favoriteCount = updated.filter((q) => q.isFavorite).length;
-    if (favoriteCount > MAX_FAVORITES) {
-      const oldestFav = updated.find((q) => q.isFavorite);
-      if (oldestFav) {
-        oldestFav.isFavorite = false;
-      }
+    const query = favorites.find((q) => q.id === id);
+    if (query) {
+      const newFavoriteState = !query.isFavorite;
+      updateFavorite(id, { isFavorite: newFavoriteState });
+      return newFavoriteState;
     }
-
-    setQueries(updated);
-    saveToStorage(updated);
-    return updated.find((q) => q.id === id)?.isFavorite || false;
+    return false;
   };
 
   const updateQuery = (id: string, updates: Partial<SavedQuery>) => {
-    const updated = queries.map((q) =>
-      q.id === id ? { ...q, ...updates, lastUsed: new Date() } : q
-    );
-    setQueries(updated);
-    saveToStorage(updated);
+    updateFavorite(id, { ...updates, lastUsed: new Date() });
   };
 
   const deleteQuery = (id: string) => {
-    const updated = queries.filter((q) => q.id !== id);
-    setQueries(updated);
-    saveToStorage(updated);
+    removeFavorite(id);
   };
 
   const getFavorites = (): SavedQuery[] => {
-    return queries.filter((q) => q.isFavorite).sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime());
+    return favorites
+      .filter((q) => q.isFavorite)
+      .sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime());
   };
 
   const getHistory = (): SavedQuery[] => {
-    return [...queries].sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime());
+    return [...favorites].sort((a, b) => b.lastUsed.getTime() - a.lastUsed.getTime());
   };
 
   const searchQueries = (term: string): SavedQuery[] => {
     const lower = term.toLowerCase();
-    return queries.filter(
+    return favorites.filter(
       (q) =>
         q.query.toLowerCase().includes(lower) ||
         q.tags.some((tag) => tag.toLowerCase().includes(lower))
@@ -124,26 +107,25 @@ export function useFavorites() {
   };
 
   const clearHistory = () => {
-    setQueries([]);
-    saveToStorage([]);
+    setFavorites([]);
   };
 
   const addTag = (id: string, tag: string) => {
-    const query = queries.find((q) => q.id === id);
+    const query = favorites.find((q) => q.id === id);
     if (query && !query.tags.includes(tag)) {
-      updateQuery(id, { tags: [...query.tags, tag] });
+      updateFavorite(id, { tags: [...query.tags, tag] });
     }
   };
 
   const removeTag = (id: string, tag: string) => {
-    const query = queries.find((q) => q.id === id);
+    const query = favorites.find((q) => q.id === id);
     if (query) {
-      updateQuery(id, { tags: query.tags.filter((t) => t !== tag) });
+      updateFavorite(id, { tags: query.tags.filter((t) => t !== tag) });
     }
   };
 
   return {
-    queries,
+    queries: favorites,
     isLoaded,
     addQuery,
     toggleFavorite,

@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { Star, Trash2, Copy, Search, X, Tag } from 'lucide-react';
-import { useFavorites, SavedQuery } from '../hooks/useFavorites';
+import { useFavorites } from '../hooks/useFavorites';
+import { SavedQuery } from '../store';
 
 interface FavoritesPanelProps {
   onSelectQuery: (query: string) => void;
