@@ -69,6 +69,22 @@ export function useFavorites() {
     return newQuery;
   };
 
+  const addQueryAsFavorite = (query: string, tags: string[] = []): SavedQuery => {
+    const id = `q-${Date.now()}`;
+    const newQuery: SavedQuery = {
+      id,
+      query,
+      tags,
+      isFavorite: true,  // ← Directly marked as favorite
+      createdAt: new Date(),
+      lastUsed: new Date(),
+      resultCount: 0,
+    };
+
+    addFavorite(newQuery);
+    return newQuery;
+  };
+
   const toggleFavorite = (id: string): boolean => {
     const query = favorites.find((q) => q.id === id);
     if (query) {
@@ -128,6 +144,7 @@ export function useFavorites() {
     queries: favorites,
     isLoaded,
     addQuery,
+    addQueryAsFavorite,
     toggleFavorite,
     updateQuery,
     deleteQuery,

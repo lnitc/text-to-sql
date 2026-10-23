@@ -18,7 +18,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const [exporting, setExporting] = useState(false);
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [newTag, setNewTag] = useState('');
-  const { toggleFavorite, getFavorites, addQuery, addTag } = useFavorites();
+  const { toggleFavorite, getFavorites, addQuery, addQueryAsFavorite, addTag } = useFavorites();
 
   const favorites = getFavorites();
   const isFavorited = message.userQuery && favorites.some((f: any) => f.query === message.userQuery);
@@ -231,10 +231,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                   onClick={() => {
                     const favorited = favorites.find((f: any) => f.query === message.userQuery);
                     if (favorited) {
+                      // Already favorited, remove it
                       toggleFavorite(favorited.id);
                     } else {
-                      const q = addQuery(message.userQuery || '');
-                      toggleFavorite(q.id);
+                      // Not favorited, add as favorite directly
+                      addQueryAsFavorite(message.userQuery || '');
                     }
                     setShowSaveForm(false);
                   }}
