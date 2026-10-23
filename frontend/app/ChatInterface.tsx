@@ -16,7 +16,7 @@ import { QueryParamsEditor } from './components/QueryParamsEditor';
 type SidebarPanel = 'favorites' | 'history' | 'analytics' | 'query-builder' | null;
 
 export const ChatInterface: React.FC = () => {
-  const { messages, isLoading, addMessage, clearMessages, setIsLoading } = useChatStore();
+  const { messages, isLoading, addMessage, removeMessage, clearMessages, setIsLoading } = useChatStore();
   const [inputValue, setInputValue] = useState('');
   const [backendReady, setBackendReady] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
@@ -69,9 +69,10 @@ export const ChatInterface: React.FC = () => {
     // Start loading
     setIsLoading(true);
 
-    // Add loading placeholder
+    // Add loading placeholder with unique ID
+    const loadingMessageId = `loading-${Date.now()}`;
     const loadingMessage: Message = {
-      id: `loading-${Date.now()}`,
+      id: loadingMessageId,
       type: 'assistant',
       content: 'Processing your query...',
       timestamp: new Date(),
@@ -81,8 +82,8 @@ export const ChatInterface: React.FC = () => {
     try {
       const response = await sendQuery(userQuery);
 
-      // Remove loading message and add response
-      messages.pop();
+      // Remove loading message
+      removeMessage(loadingMessageId);
 
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
@@ -93,8 +94,8 @@ export const ChatInterface: React.FC = () => {
       };
       addMessage(assistantMessage);
     } catch (error) {
-      // Remove loading message and add error
-      messages.pop();
+      // Remove loading message
+      removeMessage(loadingMessageId);
 
       const errorMessage: Message = {
         id: `error-${Date.now()}`,

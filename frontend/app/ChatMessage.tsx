@@ -104,27 +104,29 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
 
         {/* SQL Query */}
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-          <button
-            onClick={() => setShowSql(!showSql)}
-            className="flex items-center gap-2 w-full text-left font-medium text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
-          >
-            {showSql ? (
-              <ChevronUp size={18} />
-            ) : (
-              <ChevronDown size={18} />
-            )}
-            <span>SQL Query</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowSql(!showSql)}
+              className="flex items-center gap-2 flex-1 text-left font-medium text-gray-700 dark:text-gray-200 hover:text-gray-900 dark:hover:text-gray-100 transition-colors py-1"
+            >
+              {showSql ? (
+                <ChevronUp size={18} />
+              ) : (
+                <ChevronDown size={18} />
+              )}
+              <span>SQL Query</span>
+            </button>
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 handleCopySql();
               }}
-              className="ml-auto p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+              className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors flex-shrink-0"
               title="Copy SQL"
             >
               <Copy size={16} className={copied ? 'text-green-600' : 'text-gray-600 dark:text-gray-400'} />
             </button>
-          </button>
+          </div>
 
           {showSql && (
             <pre className="mt-3 bg-gray-900 dark:bg-black text-gray-100 p-3 rounded overflow-x-auto text-xs font-mono">
