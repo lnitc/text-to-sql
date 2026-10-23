@@ -3,9 +3,10 @@
 import React, { useState } from 'react';
 import { Message } from './store';
 import { ChartRenderer } from './ChartRenderer';
-import { Copy, ChevronDown, ChevronUp, Download, FileJson, FileText, Star } from 'lucide-react';
+import { Copy, ChevronDown, ChevronUp, Download, FileJson, FileText, Star, AlertCircle, Lightbulb } from 'lucide-react';
 import { downloadCSV, downloadJSON, copyToClipboard } from './utils/export';
 import { useFavorites } from './hooks/useFavorites';
+import { parseErrorMessage, isRecoverableError } from './utils/errorHandler';
 
 interface ChatMessageProps {
   message: Message;
@@ -73,11 +74,55 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   }
 
   if (message.error) {
+    const parsedError = parseErrorMessage(message.error);
+    const recoverable = isRecoverableError(message.error);
+
     return (
       <div className="flex justify-start mb-4">
-        <div className="max-w-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-4 py-3">
-          <p className="text-sm text-red-700 dark:text-red-400 font-medium">Error</p>
-          <p className="text-sm text-red-600 dark:text-red-300 mt-1">{message.error}</p>
+        <div className="max-w-2xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg overflow-hidden">
+          {/* Error Header */}
+          <div className="bg-red-100 dark:bg-red-900/40 px-4 py-3 border-b border-red-200 dark:border-red-800 flex items-start gap-3">
+            <AlertCircle size={20} className="text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-red-800 dark:text-red-300">{parsedError.title}</p>
+              <p className="text-sm text-red-700 dark:text-red-400 mt-1">{parsedError.message}</p>
+            </div>
+          </div>
+
+          {/* Error Details */}
+          {parsedError.details && (
+            <div className="px-4 py-3 border-b border-red-200 dark:border-red-800">
+              <details className="cursor-pointer">
+                <summary className="text-xs font-medium text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300">
+                  Technical Details
+                </summary>
+                <pre className="mt-2 text-xs bg-red-900/20 dark:bg-black/40 text-red-700 dark:text-red-300 p-2 rounded overflow-x-auto border border-red-200/50 dark:border-red-800/50">
+                  {parsedError.details}
+                </pre>
+              </details>
+            </div>
+          )}
+
+          {/* Suggestions */}
+          {parsedError.suggestions && parsedError.suggestions.length > 0 && (
+            <div className="px-4 py-3 bg-yellow-50 dark:bg-yellow-900/10 border-t border-red-200 dark:border-red-800">
+              <div className="flex items-start gap-2">
+                <Lightbulb size={16} className="text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-xs font-medium text-yellow-800 dark:text-yellow-300 mb-2">
+                    {recoverable ? 'Try Rephrasing:' : 'Suggestions:'}
+                  </p>
+                  <ul className="space-y-1">
+                    {parsedError.suggestions.map((suggestion, idx) => (
+                      <li key={idx} className="text-xs text-yellow-700 dark:text-yellow-400">
+                        • {suggestion}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
