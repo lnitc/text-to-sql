@@ -21,7 +21,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const { toggleFavorite, getFavorites, addQuery, addTag } = useFavorites();
 
   const favorites = getFavorites();
-  const isFavorited = message.content && favorites.some((f: any) => f.query === message.content);
+  const isFavorited = message.userQuery && favorites.some((f: any) => f.query === message.userQuery);
 
   const handleCopySql = () => {
     if (message.agentResponse?.sql_query) {
@@ -229,11 +229,11 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               <div className="space-y-2">
                 <button
                   onClick={() => {
-                    const favorited = favorites.find((f: any) => f.query === message.content);
+                    const favorited = favorites.find((f: any) => f.query === message.userQuery);
                     if (favorited) {
                       toggleFavorite(favorited.id);
                     } else {
-                      const q = addQuery(message.content);
+                      const q = addQuery(message.userQuery || '');
                       toggleFavorite(q.id);
                     }
                     setShowSaveForm(false);
@@ -257,7 +257,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                         onChange={e => setNewTag(e.target.value)}
                         onKeyPress={e => {
                           if (e.key === 'Enter' && newTag.trim()) {
-                            const favorited = favorites.find((f: any) => f.query === message.content);
+                            const favorited = favorites.find((f: any) => f.query === message.userQuery);
                             if (favorited) {
                               addTag(favorited.id, newTag.trim());
                               setNewTag('');
@@ -269,7 +269,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                       <button
                         onClick={() => {
                           if (newTag.trim()) {
-                            const favorited = favorites.find((f: any) => f.query === message.content);
+                            const favorited = favorites.find((f: any) => f.query === message.userQuery);
                             if (favorited) {
                               addTag(favorited.id, newTag.trim());
                               setNewTag('');

@@ -8,6 +8,7 @@ export interface Message {
   agentResponse?: AgentResponse;
   timestamp: Date;
   error?: string;
+  userQuery?: string; // Store the original user query for assistant messages
 }
 
 interface ChatStore {

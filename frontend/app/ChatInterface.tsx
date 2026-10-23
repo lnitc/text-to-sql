@@ -90,6 +90,7 @@ export const ChatInterface: React.FC = () => {
         type: 'assistant',
         content: '',
         agentResponse: response,
+        userQuery: userQuery,
         timestamp: new Date(),
       };
       addMessage(assistantMessage);
@@ -102,6 +103,7 @@ export const ChatInterface: React.FC = () => {
         type: 'assistant',
         content: '',
         error: error instanceof Error ? error.message : 'Unknown error occurred',
+        userQuery: userQuery,
         timestamp: new Date(),
       };
       addMessage(errorMessage);
