@@ -24,23 +24,38 @@ export interface AgentResponse {
 }
 
 export interface ChatRequest {
-  query: string;
+  user_query: string;
+}
+
+export interface ErrorResponse {
+  error: string;
+  message: string;
+  status_code: number;
+  details?: string;
 }
 
 export async function sendQuery(query: string): Promise<AgentResponse> {
   try {
     const response = await apiClient.post<AgentResponse>('/api/chat', {
-      query,
+      user_query: query,
     } as ChatRequest);
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      const axiosError = error as AxiosError<{ detail: string }>;
-      throw new Error(
-        axiosError.response?.data?.detail ||
-          axiosError.message ||
-          'Failed to send query'
-      );
+      const axiosError = error as AxiosError<ErrorResponse>;
+      const errorData = axiosError.response?.data;
+      
+      // Try to extract message from error response
+      let errorMessage = 'Failed to send query';
+      if (errorData?.message) {
+        errorMessage = errorData.message;
+      } else if (errorData?.details) {
+        errorMessage = errorData.details;
+      } else if (axiosError.message) {
+        errorMessage = axiosError.message;
+      }
+      
+      throw new Error(errorMessage);
     }
     throw error;
   }
