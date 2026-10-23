@@ -62,14 +62,6 @@ class ChartData(BaseModel):
         example="Revenue by Category"
     )
 
-    @field_validator("data")
-    @classmethod
-    def validate_data_not_empty(cls, v: list) -> list:
-        """Ensure data array has at least one item."""
-        if len(v) == 0:
-            raise ValueError("Chart data cannot be empty")
-        return v
-
 
 class AgentResponse(BaseModel):
     """Complete response from the CrewAI pipeline."""
