@@ -59,11 +59,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # ============================================================================
 # Entrypoint
 # ============================================================================
-# Run Uvicorn ASGI server with Python module execution
-# -m uvicorn: Ensures PYTHONPATH is respected for module imports
-# --host 0.0.0.0: Listen on all interfaces (required for Docker)
-# --port 8000: Listen on port 8000 (matches EXPOSE)
-CMD ["sh", "-c", "PYTHONPATH=/app python -m uvicorn main:app --host 0.0.0.0 --port 8000"]
+# Run via Python wrapper script that sets up sys.path correctly
+# The wrapper ensures imports like 'from backend.config' work in Docker
+CMD ["python", "run.py"]
 
 # ============================================================================
 # Notes:

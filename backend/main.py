@@ -7,14 +7,6 @@ Provides HTTP endpoints:
 - OpenAPI documentation
 """
 
-import sys
-import os
-from pathlib import Path
-
-# Ensure the backend directory is in Python path for imports
-# This is needed in containerized environments where imports need resolution
-sys.path.insert(0, str(Path(__file__).parent))
-
 import time
 from contextlib import asynccontextmanager
 from typing import Any
