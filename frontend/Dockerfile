@@ -6,12 +6,15 @@
 # ============================================================================
 # STAGE 1: BUILDER
 # ============================================================================
-FROM node:20-alpine AS builder
+FROM node:20 AS builder
 
 LABEL maintainer="Text-to-SQL Project"
 LABEL description="Next.js frontend for Text-to-SQL Agentic Data Analyst"
 
 WORKDIR /app
+
+# Install Python and build tools needed for native modules (lightningcss, etc.)
+RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
 # Dependencies - Copy package files for layer caching
@@ -28,16 +31,14 @@ RUN npm ci --omit=optional || npm install --omit=optional
 # ============================================================================
 COPY . .
 
-# Build Next.js application
+# Build Next.js application with Turbopack (default in Next.js 16)
 # Outputs optimized build to .next directory
 RUN npm run build
 
 # ============================================================================
 # STAGE 2: RUNTIME
 # ============================================================================
-FROM node:20-alpine
-
-WORKDIR /app
+FROM node:20
 
 # ============================================================================
 # Production Dependencies Only

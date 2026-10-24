@@ -50,8 +50,6 @@ CHANGELOG.md
 LICENSE
 .eslintignore
 .prettierignore
-tsconfig.json
-next.config.ts
 eslint.config.mjs
 
 # CI/CD
