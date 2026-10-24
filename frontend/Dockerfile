@@ -46,9 +46,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install only production dependencies (much lighter)
-# --omit=dev flag excludes dev dependencies
-# If package-lock.json doesn't exist, fall back to npm install
-RUN npm ci --omit=dev --omit=optional || npm install --production --omit=optional
+# Use --production or --omit=dev to exclude dev dependencies
+RUN npm ci --omit=optional || npm install --production --omit=optional
 
 # ============================================================================
 # Copy Built Application
