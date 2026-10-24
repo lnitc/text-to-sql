@@ -10,13 +10,6 @@ node_modules
 npm-debug.log
 yarn.lock
 
-# Next.js Build Output
-.next
-.out
-out
-dist
-build
-
 # Environment Files (secrets should never be in image)
 .env
 .env.local

@@ -4,7 +4,7 @@
 # ============================================================================
 
 # ============================================================================
-# STAGE 1: BUILDER
+# STAGE 1: BUILDER (build locally, this stage is mainly for context)
 # ============================================================================
 FROM node:20 AS builder
 
@@ -13,7 +13,7 @@ LABEL description="Next.js frontend for Text-to-SQL Agentic Data Analyst"
 
 WORKDIR /app
 
-# Install Python and build tools needed for native modules (lightningcss, etc.)
+# Install Python and build tools needed for native modules
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 # ============================================================================
@@ -31,9 +31,10 @@ RUN npm ci --omit=optional || npm install --omit=optional
 # ============================================================================
 COPY . .
 
-# Build Next.js application with Turbopack (default in Next.js 16)
-# Outputs optimized build to .next directory
-RUN npm run build
+# NOTE: .next folder is copied from host (must run locally: npm run build)
+# Docker Turbopack builds have native module compatibility issues
+# Solution: Pre-build locally where native modules work reliably
+# Production workflow: (1) npm run build locally, (2) docker compose up
 
 # ============================================================================
 # STAGE 2: RUNTIME
