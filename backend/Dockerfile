@@ -60,10 +60,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Entrypoint
 # ============================================================================
 # Run Uvicorn ASGI server
+# PYTHONPATH=/app allows imports like "from backend.config"
 # --host 0.0.0.0: Listen on all interfaces (required for Docker)
 # --port 8000: Listen on port 8000 (matches EXPOSE)
 # --reload: Auto-reload on code changes (for development)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["sh", "-c", "PYTHONPATH=/app uvicorn main:app --host 0.0.0.0 --port 8000 --reload"]
 
 # ============================================================================
 # Notes:
