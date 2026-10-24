@@ -36,6 +36,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source code
 COPY . .
 
+# Set Python path so imports work correctly from /app directory
+ENV PYTHONPATH=/app:$PYTHONPATH
+
 # ============================================================================
 # Runtime Configuration
 # ============================================================================
