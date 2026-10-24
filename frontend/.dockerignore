@@ -1,0 +1,71 @@
+# ============================================================================
+# FRONTEND DOCKERIGNORE
+# ============================================================================
+# Files and directories excluded from Docker build context
+# Reduces build time and image size
+# ============================================================================
+
+# Node Package Management
+node_modules
+npm-debug.log
+yarn.lock
+
+# Next.js Build Output
+.next
+.out
+out
+dist
+build
+
+# Environment Files (secrets should never be in image)
+.env
+.env.local
+.env.*.local
+
+# Development Tools
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+.editorconfig
+
+# Version Control
+.git
+.gitignore
+.gitattributes
+
+# Package Management
+.pnp
+.pnp.js
+
+# Testing
+coverage
+.nyc_output
+
+# Misc
+README.md
+CHANGELOG.md
+LICENSE
+.eslintignore
+.prettierignore
+tsconfig.json
+next.config.ts
+eslint.config.mjs
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.circleci
+
+# Docker & Kubernetes
+docker-compose*.yml
+Dockerfile
+.dockerignore
+.k8s
+helm
+
+# Other files
+*.md
+.env.example
