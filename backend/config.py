@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # OpenAI Configuration
     # ========================================================================
     openai_api_key: str
-    openai_model: Literal["gpt-4o", "gpt-3.5-turbo", "gpt-4-turbo"] = "gpt-3.5-turbo"
+    openai_model: Literal["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"] = "gpt-4o-mini"
     openai_temperature: float = 0.7
     openai_max_tokens: int = 2000
     openai_monthly_budget: float = 15.0

@@ -8,13 +8,46 @@ export interface ParsedError {
   message: string;
   details?: string;
   suggestions?: string[];
-  type: 'sql' | 'auth' | 'network' | 'unknown';
+  type: 'sql' | 'auth' | 'network' | 'model' | 'unknown';
 }
 
 /**
  * Parse backend error messages and extract useful information
  */
 export function parseErrorMessage(error: string): ParsedError {
+  // Model/LLM errors
+  if (error.includes('model') && error.includes('not found')) {
+    return parseModelError(error);
+  }
+
+  if (error.includes('OpenAI') && error.includes('authentication')) {
+    return {
+      title: 'OpenAI Authentication Error',
+      message: 'Unable to authenticate with OpenAI API.',
+      details: 'Please verify that OPENAI_API_KEY is set correctly in your backend configuration.',
+      suggestions: [
+        'Check that OPENAI_API_KEY environment variable is set',
+        'Verify your OpenAI API key is valid and has appropriate permissions',
+        'Restart the backend server after updating credentials',
+        'Check OpenAI status at https://status.openai.com',
+      ],
+      type: 'auth',
+    };
+  }
+
+  if (error.includes('rate limit') || error.includes('rate_limit_exceeded')) {
+    return {
+      title: 'OpenAI Rate Limit',
+      message: 'Too many requests to OpenAI API. Please wait and try again.',
+      suggestions: [
+        'Wait a minute before trying again',
+        'Try with a simpler query',
+        'Check your OpenAI account usage at https://platform.openai.com/account/billing/usage',
+      ],
+      type: 'unknown',
+    };
+  }
+
   // SQL errors
   if (error.includes('SQL Error') || error.includes('invalidQuery')) {
     return parseSqlError(error);
@@ -64,6 +97,30 @@ export function parseErrorMessage(error: string): ParsedError {
     type: 'unknown',
   };
 }
+
+/**
+ * Parse model-related errors
+ */
+function parseModelError(error: string): ParsedError {
+  // Extract model name if possible
+  const modelMatch = error.match(/model['\s:]+([^\s']+)/i);
+  const modelName = modelMatch ? modelMatch[1] : 'OpenAI model';
+
+  return {
+    title: 'Model Unavailable',
+    message: `The configured AI model "${modelName}" is not available. This model may have been deprecated or your API key doesn't have access to it.`,
+    details:
+      'Contact your system administrator to update the OPENAI_MODEL configuration to a valid model like "gpt-4o-mini" or "gpt-4o".',
+    suggestions: [
+      'Ask your system administrator to update the OpenAI model configuration',
+      'Valid models: gpt-4o-mini (recommended), gpt-4o, gpt-4-turbo',
+      'Check OpenAI API documentation for available models: https://platform.openai.com/docs/models',
+      'Restart the backend server after the configuration is updated',
+    ],
+    type: 'model',
+  };
+}
+
 
 /**
  * Parse SQL-specific errors and provide suggestions
@@ -158,6 +215,11 @@ export function isRecoverableError(error: string): boolean {
     'does not support',
     'invalid column',
   ];
+
+  // Model errors are NOT recoverable by the user (need admin action)
+  if (error.includes('model') && error.includes('not found')) {
+    return false;
+  }
 
   return recoverablePatterns.some((pattern) =>
     error.toLowerCase().includes(pattern.toLowerCase())

@@ -265,9 +265,23 @@ async def chat(request: ChatRequest) -> AgentResponse:
         result = await pipeline.execute_async(user_query)
 
         if not result.get("success"):
+            error_msg = result.get('error', 'Unknown error')
+            
+            # Log specific error types for better error categorization
+            if "model" in error_msg.lower() and "not found" in error_msg.lower():
+                print(f"[Chat] Model not found error: {error_msg}")
+            elif "authentication" in error_msg.lower():
+                print(f"[Chat] Authentication error: {error_msg}")
+            elif "rate" in error_msg.lower():
+                print(f"[Chat] Rate limit error: {error_msg}")
+            elif "sql" in error_msg.lower():
+                print(f"[Chat] SQL execution error: {error_msg}")
+            else:
+                print(f"[Chat] Pipeline error: {error_msg}")
+            
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Pipeline execution failed: {result.get('error', 'Unknown error')}",
+                detail=error_msg,
             )
 
         # Build response

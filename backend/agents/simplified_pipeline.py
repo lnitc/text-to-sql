@@ -129,6 +129,9 @@ class SimplifiedTextToSQLPipeline:
 
         Returns:
             SQL query string
+            
+        Raises:
+            Exception with specific error message for model not found or other issues
         """
         prompt_template = PromptTemplate(
             input_variables=["user_query", "products_schema", "order_items_schema"],
@@ -176,9 +179,36 @@ SQL Query:"""
             return sql_query
 
         except Exception as e:
-            logger.error(f"[Pipeline] SQL generation failed: {str(e)}")
-            # Fallback query
-            return "SELECT * FROM `bigquery-public-data.thelook_ecommerce.products` LIMIT 10"
+            error_str = str(e)
+            
+            # Detect and provide specific error messages
+            if "model" in error_str.lower() and "not found" in error_str.lower():
+                # Model not found error from OpenAI API
+                model_name = settings.openai_model
+                logger.error(f"[Pipeline] SQL generation failed: Model '{model_name}' not found or unavailable")
+                raise Exception(
+                    f"OpenAI model '{model_name}' is not available. "
+                    f"This model may have been deprecated. "
+                    f"Please update OPENAI_MODEL in configuration to a valid model like 'gpt-4o-mini' or 'gpt-4o'. "
+                    f"Error: {error_str}"
+                )
+            elif "authentication" in error_str.lower() or "unauthorized" in error_str.lower():
+                logger.error(f"[Pipeline] SQL generation failed: Authentication error")
+                raise Exception(
+                    f"OpenAI API authentication failed. "
+                    f"Please check your OPENAI_API_KEY configuration. "
+                    f"Error: {error_str}"
+                )
+            elif "rate" in error_str.lower():
+                logger.error(f"[Pipeline] SQL generation failed: Rate limit exceeded")
+                raise Exception(
+                    f"OpenAI API rate limit exceeded. "
+                    f"Please wait a moment and try again. "
+                    f"Error: {error_str}"
+                )
+            else:
+                logger.error(f"[Pipeline] SQL generation failed: {error_str}")
+                raise Exception(f"Failed to generate SQL: {error_str}")
 
     def _format_chart_data(self, data: list[dict], schema: list[str]) -> ChartData:
         """
