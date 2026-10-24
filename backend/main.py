@@ -16,15 +16,15 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 
-from backend.config import settings, validate_settings
-from backend.schemas.models import (
+from config import settings, validate_settings
+from schemas.models import (
     ChatRequest,
     AgentResponse,
     HealthResponse,
     ErrorResponse,
     ChartData,
 )
-from backend.agents.simplified_pipeline import create_simplified_pipeline
+from agents.simplified_pipeline import create_simplified_pipeline
 
 
 # ============================================================================
