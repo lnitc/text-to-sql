@@ -16,14 +16,14 @@ import logging
 import json
 from pydantic import BaseModel, Field
 
-from backend.config import settings
-from backend.tools import create_bigquery_tool
-from backend.schemas.bigquery_schema import (
+from config import settings
+from tools import create_bigquery_tool
+from schemas.bigquery_schema import (
     format_schema_for_agent,
     PRODUCTS_SCHEMA,
     ORDER_ITEMS_SCHEMA,
 )
-from backend.schemas.models import ChartData
+from schemas.models import ChartData
 
 logger = logging.getLogger(__name__)
 

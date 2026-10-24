@@ -18,10 +18,10 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
-from backend.config import settings
-from backend.tools import create_bigquery_tool
-from backend.schemas.bigquery_schema import format_schema_for_agent
-from backend.schemas.models import ChartData
+from config import settings
+from tools import create_bigquery_tool
+from schemas.bigquery_schema import format_schema_for_agent
+from schemas.models import ChartData
 
 logger = logging.getLogger(__name__)
 
