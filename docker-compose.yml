@@ -51,7 +51,8 @@ services:
     
     volumes:
       # Mount GCP service account key (read-only)
-      - ${GCP_KEY_PATH:-.}/gcp-key.json:/secrets/gcp-key.json:ro
+      # On Windows: use full path or relative path to the gcp-key.json file
+      - ./gcp-key.json:/secrets/gcp-key.json:ro
       # Mount source code for hot-reload during development
       - ./backend:/app
       # Exclude venv and __pycache__ from sync
