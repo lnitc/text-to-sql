@@ -19,8 +19,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-# --no-optional: skip optional dependencies to reduce size
-RUN npm ci --no-optional
+# --omit=optional: skip optional dependencies to reduce size
+# If package-lock.json doesn't exist, fall back to npm install
+RUN npm ci --omit=optional || npm install --omit=optional
 
 # ============================================================================
 # Build Application
@@ -45,8 +46,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install only production dependencies (much lighter)
-# --production flag excludes dev dependencies
-RUN npm ci --production --no-optional
+# --omit=dev flag excludes dev dependencies
+# If package-lock.json doesn't exist, fall back to npm install
+RUN npm ci --omit=dev --omit=optional || npm install --production --omit=optional
 
 # ============================================================================
 # Copy Built Application
