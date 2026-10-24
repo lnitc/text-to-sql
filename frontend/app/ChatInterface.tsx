@@ -3,7 +3,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useChatStore, Message } from './store';
 import { ChatMessage } from './ChatMessage';
-import { Send, Trash2, Download, Moon, Sun, Sidebar, Clock, Star, BarChart3, Settings } from 'lucide-react';
+import { Send, Trash2, Download, Moon, Sun, Sidebar, Clock, Star, BarChart3 } from 'lucide-react';
 import { sendQuery, checkHealth } from './api';
 import { useMessagePersistence } from './hooks/useMessagePersistence';
 import { useDarkMode } from './hooks/useDarkMode';
@@ -11,9 +11,8 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { FavoritesPanel } from './components/FavoritesPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
-import { QueryParamsEditor } from './components/QueryParamsEditor';
 
-type SidebarPanel = 'favorites' | 'history' | 'analytics' | 'query-builder' | null;
+type SidebarPanel = 'favorites' | 'history' | 'analytics' | null;
 
 export const ChatInterface: React.FC = () => {
   const { messages, isLoading, addMessage, removeMessage, clearMessages, setIsLoading } = useChatStore();
@@ -304,17 +303,7 @@ export const ChatInterface: React.FC = () => {
           <BarChart3 size={20} />
         </button>
 
-        <button
-          onClick={() => toggleSidebar('query-builder')}
-          className={`p-3 rounded-lg transition ${
-            sidebarPanel === 'query-builder'
-              ? isDark ? 'bg-green-600 text-white' : 'bg-green-500 text-white'
-              : isDark ? 'hover:bg-gray-800 text-gray-400 hover:text-gray-200' : 'hover:bg-gray-100 text-gray-600'
-          }`}
-          title="Query Builder"
-        >
-          <Settings size={20} />
-        </button>
+        {/* Query Builder button hidden for now - will be enabled in future phase */}
       </div>
 
       {/* Sidebar Panel */}
@@ -328,9 +317,6 @@ export const ChatInterface: React.FC = () => {
           )}
           {sidebarPanel === 'analytics' && (
             <AnalyticsDashboard isDark={isDark} />
-          )}
-          {sidebarPanel === 'query-builder' && (
-            <QueryParamsEditor onApply={handleApplyQuery} isDark={isDark} onClose={() => setSidebarPanel(null)} />
           )}
         </div>
       )}
