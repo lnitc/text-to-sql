@@ -3,10 +3,12 @@ Main FastAPI application for Text-to-SQL Agentic Data Analyst backend.
 
 Provides HTTP endpoints:
 - Health checks
-- Chat queries (text-to-SQL conversion with CrewAI pipeline)
+- Chat queries (text-to-SQL conversion with the simplified or CrewAI
+  multi-agent pipeline, selected by PIPELINE_MODE or per request)
 - OpenAPI documentation
 """
 
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -30,10 +32,35 @@ from agents.simplified_pipeline import create_simplified_pipeline
 
 
 # ============================================================================
-# Global Pipeline Instance (initialized on startup)
+# Pipeline Instances
 # ============================================================================
 
-pipeline = None
+# Pipelines by name ("simple" / "crew"). The simplified pipeline is created on
+# startup. The CrewAI pipeline is created on startup only when it is the
+# default (PIPELINE_MODE=crew), otherwise on first use, because importing
+# CrewAI adds several seconds to startup.
+pipelines: dict[str, Any] = {}
+_crew_init_lock = asyncio.Lock()
+
+
+def _create_crew_pipeline():
+    from agents.data_crew import create_crew_pipeline
+
+    return create_crew_pipeline(settings.gcp_project_id)
+
+
+async def get_pipeline(name: str):
+    """Return the named pipeline, creating the CrewAI pipeline on first use."""
+    if name in pipelines:
+        return pipelines[name]
+    if name == "crew" and validate_settings()[0]:
+        async with _crew_init_lock:
+            if "crew" not in pipelines:
+                print("Initializing CrewAI multi-agent pipeline...")
+                pipelines["crew"] = await asyncio.to_thread(_create_crew_pipeline)
+                print("CrewAI multi-agent pipeline initialized successfully")
+        return pipelines["crew"]
+    return None
 
 
 # ============================================================================
@@ -47,12 +74,11 @@ async def lifespan(app: FastAPI):
     Application lifespan context manager.
     Runs on startup and shutdown.
     """
-    global pipeline
-    
     # Startup
     print(f"Starting {settings.app_name} v{settings.app_version}")
     print(f"Environment: {settings.environment}")
     print(f"Debug: {settings.debug}")
+    print(f"Default pipeline: {settings.pipeline_mode}")
 
     # Validate settings
     is_valid, message = validate_settings()
@@ -62,12 +88,20 @@ async def lifespan(app: FastAPI):
         # Initialize pipeline
         try:
             print(f"Initializing Text-to-SQL pipeline for project: {settings.gcp_project_id}")
-            pipeline = create_simplified_pipeline(settings.gcp_project_id)
+            pipelines["simple"] = create_simplified_pipeline(settings.gcp_project_id)
             print("Text-to-SQL pipeline initialized successfully")
         except Exception as e:
             print(f"ERROR: Failed to initialize pipeline: {str(e)}")
             import traceback
             traceback.print_exc()
+
+        if settings.pipeline_mode == "crew":
+            try:
+                await get_pipeline("crew")
+            except Exception as e:
+                print(f"ERROR: Failed to initialize CrewAI pipeline: {str(e)}")
+                import traceback
+                traceback.print_exc()
 
     yield
 
@@ -213,15 +247,19 @@ async def health_check() -> HealthResponse:
     """
     # Validate settings
     is_valid, message = validate_settings()
-    if is_valid and pipeline is None:
+    # The crew pipeline may legitimately not exist yet (lazy init), so only
+    # the default pipeline's absence makes the service degraded.
+    if is_valid and settings.pipeline_mode not in pipelines:
         is_valid = False
-        message = "Text-to-SQL pipeline failed to initialize. Check the backend logs."
+        name = "CrewAI multi-agent" if settings.pipeline_mode == "crew" else "Text-to-SQL"
+        message = f"{name} pipeline failed to initialize. Check the backend logs."
     status_value = "ok" if is_valid else "degraded"
 
     return HealthResponse(
         status=status_value,
         message=message,
         version=settings.app_version,
+        default_pipeline=settings.pipeline_mode,
     )
 
 
@@ -265,7 +303,6 @@ async def chat(request: ChatRequest) -> AgentResponse:
     Raises:
         HTTPException: If query processing fails
     """
-    global pipeline
     start_time = time.time()
 
     try:
@@ -277,14 +314,23 @@ async def chat(request: ChatRequest) -> AgentResponse:
                 detail="Query cannot be empty",
             )
 
-        # Check if pipeline is initialized
+        # Resolve the pipeline (request override, else server default)
+        pipeline_name = request.pipeline or settings.pipeline_mode
+        try:
+            pipeline = await get_pipeline(pipeline_name)
+        except Exception as exc:
+            print(f"[Chat] Failed to initialize {pipeline_name} pipeline: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"The {pipeline_name} pipeline could not be initialized: {exc}",
+            )
         if pipeline is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Text-to-SQL pipeline not initialized. Check backend configuration.",
             )
 
-        print(f"[Chat] Processing query: {user_query}")
+        print(f"[Chat] Processing query ({pipeline_name} pipeline): {user_query}")
 
         # Execute pipeline asynchronously
         result = await pipeline.execute_async(user_query)
@@ -321,6 +367,9 @@ async def chat(request: ChatRequest) -> AgentResponse:
                 title="Results"
             )),
             execution_time_ms=result.get("execution_time_ms", 0),
+            pipeline=pipeline_name,
+            insights=result.get("insights", []),
+            follow_up_questions=result.get("follow_up_questions", []),
         )
 
         return response

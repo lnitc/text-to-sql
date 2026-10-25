@@ -250,6 +250,45 @@ class BigQueryTool:
                 "execution_time_ms": execution_time,
             }
 
+    def dry_run(self, query: str) -> dict[str, Any]:
+        """
+        Validate a query with a BigQuery dry run (free; nothing is executed).
+
+        Args:
+            query: SQL query string
+
+        Returns:
+            dict with keys:
+            - success (bool): Whether BigQuery accepted the query
+            - bytes_processed (int): Bytes the query would scan
+            - error (str): Error message if invalid
+        """
+        try:
+            query_config = bigquery.QueryJobConfig(dry_run=True, use_query_cache=False)
+            query_job = self.client.query(query, job_config=query_config)
+            bytes_processed = query_job.total_bytes_processed or 0
+            if self.max_bytes_billed and bytes_processed > self.max_bytes_billed:
+                return {
+                    "success": False,
+                    "bytes_processed": bytes_processed,
+                    "error": (
+                        f"Query would scan {bytes_processed:,} bytes, over the "
+                        f"{self.max_bytes_billed:,} byte limit"
+                    ),
+                }
+            return {"success": True, "bytes_processed": bytes_processed, "error": None}
+        except BadRequest as e:
+            # e.message omits the request URL and job details, which only
+            # distract an LLM that has to fix the query
+            message = getattr(e, "message", None) or str(e)
+            return {"success": False, "bytes_processed": 0, "error": f"SQL Error: {message}"}
+        except Exception as e:
+            return {
+                "success": False,
+                "bytes_processed": 0,
+                "error": f"Dry run failed: {type(e).__name__}: {e}",
+            }
+
     def get_table_schema(self, dataset_id: str, table_id: str) -> dict[str, Any]:
         """
         Retrieve schema for a specific table.

@@ -3,16 +3,18 @@
 import React, { useState } from 'react';
 import { Message } from './store';
 import { ChartRenderer } from './ChartRenderer';
-import { Copy, ChevronDown, ChevronUp, FileJson, FileText, Star, AlertCircle, Lightbulb } from 'lucide-react';
+import { Copy, ChevronDown, ChevronUp, FileJson, FileText, Star, AlertCircle, Lightbulb, Users, MessageCircleQuestion } from 'lucide-react';
 import { downloadCSV, downloadJSON, copyToClipboard } from './utils/export';
 import { useFavorites } from './hooks/useFavorites';
 import { parseErrorMessage, isRecoverableError } from './utils/errorHandler';
 
 interface ChatMessageProps {
   message: Message;
+  /** Called when a suggested follow-up question is clicked */
+  onFollowUp?: (question: string) => void;
 }
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
+export const ChatMessage: React.FC<ChatMessageProps> = ({ message, onFollowUp }) => {
   const [showSql, setShowSql] = useState(false);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -135,7 +137,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     return (
       <div className="flex justify-start mb-4">
         <div className="max-w-2xl bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3 animate-pulse">
-          <p className="text-sm text-gray-600 dark:text-gray-400">Processing your query...</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{message.content || 'Processing your query...'}</p>
         </div>
       </div>
     );
@@ -148,6 +150,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
           <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
             Analysis
+            {message.agentResponse.pipeline === 'crew' && (
+              <span
+                className="ml-2 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300"
+                title="Answered by the CrewAI multi-agent pipeline"
+              >
+                <Users size={12} />
+                Multi-agent
+              </span>
+            )}
             {message.agentResponse.execution_time_ms !== undefined && (
               <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
                 · {(message.agentResponse.execution_time_ms / 1000).toFixed(1)}s
@@ -155,9 +166,41 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             )}
           </p>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-line">{message.agentResponse.thought_process}</p>
+
+          {/* Insights (multi-agent pipeline) */}
+          {message.agentResponse.insights && message.agentResponse.insights.length > 0 && (
+            <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-400 list-disc pl-5">
+              {message.agentResponse.insights.map((insight, idx) => (
+                <li key={idx}>{insight}</li>
+              ))}
+            </ul>
+          )}
+
+          {/* Suggested follow-ups (multi-agent pipeline) */}
+          {message.agentResponse.follow_up_questions && message.agentResponse.follow_up_questions.length > 0 && (
+            <div className="mt-3">
+              <p className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                <MessageCircleQuestion size={14} />
+                Follow-up questions
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {message.agentResponse.follow_up_questions.map((question, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => onFollowUp?.(question)}
+                    className="text-left text-xs px-2 py-1 rounded border border-purple-200 dark:border-purple-800 bg-white dark:bg-gray-900 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-900/30 transition-colors"
+                    title="Use this question"
+                  >
+                    {question}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* SQL Query */}
+        {/* SQL Query (absent when the question couldn't be answered) */}
+        {message.agentResponse.sql_query && (
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
             <button
@@ -189,6 +232,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
             </pre>
           )}
         </div>
+        )}
 
         {/* Chart Visualization */}
         <div className="px-4 py-4">

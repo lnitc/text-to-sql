@@ -4,7 +4,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import { useChatStore, Message } from './store';
 import { ChatMessage } from './ChatMessage';
 import { Send, Trash2, Download, Moon, Sun, Clock, Star, BarChart3, SlidersHorizontal } from 'lucide-react';
-import { sendQuery, checkHealth, API_BASE_URL } from './api';
+import { sendQuery, checkHealth, API_BASE_URL, PipelineName } from './api';
 import { useMessagePersistence } from './hooks/useMessagePersistence';
 import { useDarkMode } from './hooks/useDarkMode';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -19,6 +19,16 @@ type SidebarPanel = 'favorites' | 'history' | 'analytics' | 'builder' | null;
 // Must match the backend's ChatRequest.user_query max_length
 const MAX_QUERY_LENGTH = 1000;
 const HEALTH_RETRY_MS = 5000;
+const PIPELINE_STORAGE_KEY = 'text-to-sql-pipeline';
+
+function readStoredPipeline(): PipelineName | null {
+  try {
+    const stored = localStorage.getItem(PIPELINE_STORAGE_KEY);
+    return stored === 'simple' || stored === 'crew' ? stored : null;
+  } catch {
+    return null;
+  }
+}
 
 export const ChatInterface: React.FC = () => {
   const { messages, isLoading, addMessage, removeMessage, clearMessages, setIsLoading } = useChatStore();
@@ -26,6 +36,7 @@ export const ChatInterface: React.FC = () => {
   const [backendReady, setBackendReady] = useState(false);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>(null);
+  const [pipeline, setPipeline] = useState<PipelineName>('simple');
   const { downloadConversation } = useMessagePersistence();
   const { recordQuery } = useFavorites();
   const { isDark, toggleDarkMode } = useDarkMode();
@@ -55,6 +66,8 @@ export const ChatInterface: React.FC = () => {
       setBackendReady(isReady);
       if (isReady) {
         setBackendError(null);
+        // The user's last choice wins; otherwise follow the server default
+        setPipeline(readStoredPipeline() ?? health.default_pipeline ?? 'simple');
         return;
       }
       setBackendError(
@@ -104,13 +117,16 @@ export const ChatInterface: React.FC = () => {
     const loadingMessage: Message = {
       id: loadingMessageId,
       type: 'assistant',
-      content: 'Processing your query...',
+      content:
+        pipeline === 'crew'
+          ? 'Agents are planning, writing SQL and analyzing the results (this takes 10-30 seconds)...'
+          : 'Processing your query...',
       timestamp: new Date(),
     };
     addMessage(loadingMessage);
 
     try {
-      const response = await sendQuery(userQuery);
+      const response = await sendQuery(userQuery, pipeline);
 
       // Remove loading message
       removeMessage(loadingMessageId);
@@ -146,6 +162,16 @@ export const ChatInterface: React.FC = () => {
 
   const handleSelectQuery = (query: string) => {
     setInputValue(query);
+  };
+
+  const handlePipelineChange = (useCrew: boolean) => {
+    const next: PipelineName = useCrew ? 'crew' : 'simple';
+    setPipeline(next);
+    try {
+      localStorage.setItem(PIPELINE_STORAGE_KEY, next);
+    } catch {
+      // Preference just won't persist
+    }
   };
 
   const handleApplyQuery = (query: string) => {
@@ -225,7 +251,7 @@ export const ChatInterface: React.FC = () => {
             ) : (
               <>
                 {messages.map((message: Message) => (
-                  <ChatMessage key={message.id} message={message} />
+                  <ChatMessage key={message.id} message={message} onFollowUp={handleSelectQuery} />
                 ))}
                 <div ref={messagesEndRef} />
               </>
@@ -288,9 +314,26 @@ export const ChatInterface: React.FC = () => {
                 </button>
               )}
             </form>
-            <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} mt-2`}>
-              Backend: {backendReady ? 'Connected' : 'Disconnected'} | API Base: {API_BASE_URL}
-            </p>
+            <div className={`flex flex-wrap items-center justify-between gap-2 text-xs mt-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              <label
+                className="flex items-center gap-2 cursor-pointer select-none"
+                title="Use the CrewAI multi-agent pipeline: a planner, SQL developer and analyst agent. Slower, but adds written insights and follow-up questions."
+              >
+                <input
+                  type="checkbox"
+                  checked={pipeline === 'crew'}
+                  onChange={(e) => handlePipelineChange(e.target.checked)}
+                  disabled={isLoading}
+                  className="accent-purple-600"
+                />
+                <span className={pipeline === 'crew' ? (isDark ? 'text-purple-300' : 'text-purple-700') : ''}>
+                  Multi-agent analysis (beta, slower)
+                </span>
+              </label>
+              <span>
+                Backend: {backendReady ? 'Connected' : 'Disconnected'} | API Base: {API_BASE_URL}
+              </span>
+            </div>
           </div>
         </div>
       </div>

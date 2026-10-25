@@ -18,6 +18,14 @@ class ChatRequest(BaseModel):
         example="What were the top 5 product categories by revenue last month?"
     )
 
+    pipeline: Optional[Literal["simple", "crew"]] = Field(
+        default=None,
+        description=(
+            "Pipeline to use: 'simple' (single LLM call) or 'crew' (CrewAI "
+            "multi-agent flow). Defaults to the server's PIPELINE_MODE."
+        ),
+    )
+
     @field_validator("user_query")
     @classmethod
     def validate_query_not_empty(cls, v: str) -> str:
@@ -89,6 +97,21 @@ class AgentResponse(BaseModel):
         description="Query execution time in milliseconds"
     )
 
+    pipeline: Literal["simple", "crew"] = Field(
+        default="simple",
+        description="Pipeline that produced this response"
+    )
+
+    insights: list[str] = Field(
+        default_factory=list,
+        description="Key findings written by the analyst agent (crew pipeline only)"
+    )
+
+    follow_up_questions: list[str] = Field(
+        default_factory=list,
+        description="Suggested next questions (crew pipeline only)"
+    )
+
 
 class HealthResponse(BaseModel):
     """Health check response."""
@@ -106,6 +129,11 @@ class HealthResponse(BaseModel):
     version: str = Field(
         ...,
         description="API version"
+    )
+
+    default_pipeline: Literal["simple", "crew"] = Field(
+        default="simple",
+        description="Pipeline used when a request doesn't specify one"
     )
 
 

@@ -335,6 +335,9 @@ export GOOGLE_APPLICATION_CREDENTIALS=./gcp-key.json
 
 **Backend (.env)**
 ```env
+# Pipeline: simple (default, one LLM call) or crew (CrewAI multi-agent flow)
+PIPELINE_MODE=simple
+
 # OpenAI Configuration
 OPENAI_API_KEY=sk-proj-xxxxx
 OPENAI_MODEL=gpt-4o              # or gpt-4-turbo for cost savings
@@ -352,6 +355,7 @@ BQ_DATASET_PROJECT=bigquery-public-data
 BQ_DATASET_ID=thelook_ecommerce
 BQ_QUERY_TIMEOUT_SECONDS=30
 BQ_MAX_RESULTS_ROWS=1000
+BQ_MAX_BYTES_BILLED=10737418240  # Per-query scan cap (10 GB)
 
 # Application Configuration
 ENVIRONMENT=development          # development, staging, production
@@ -361,9 +365,8 @@ LOG_LEVEL=INFO
 
 **Frontend (.env.local)**
 ```env
-NEXT_PUBLIC_API_URL=http://localhost:8000    # Local development
-# Or for Docker:
-NEXT_PUBLIC_API_URL=http://backend:8000
+# Called from the browser, so use a host-reachable URL (also under Docker)
+NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_ENVIRONMENT=development
 ```
 
@@ -680,12 +683,21 @@ docker compose logs backend -f
 
 ## 💡 Architecture Decisions
 
-### Why CrewAI for Orchestration?
-- Multi-agent system allows task decomposition
-- Agent 1: Specialized in SQL generation
-- Agent 2: Specialized in error handling and recovery
-- Agent 3: Specialized in data formatting and visualization selection
-- Easily extensible for new agent roles
+### Why Two Pipelines?
+The backend ships two interchangeable pipelines with the same API contract,
+selected by `PIPELINE_MODE` or per request (the UI's "Multi-agent analysis" toggle):
+
+- **simple** (default, `agents/simplified_pipeline.py`): one LLM call writes the
+  SQL, with automatic correction if BigQuery rejects it. ~3 s per question.
+- **crew** (`agents/data_crew.py`): a CrewAI Flow with three agents:
+  - *Planner*: interprets the question and decides how to answer it (or that it can't be answered)
+  - *SQL developer*: writes the query and fixes it from dry-run/execution errors
+  - *Analyst*: writes the answer, insights and follow-up questions from the result rows
+
+  Validation, execution and chart selection are deterministic code steps shared
+  with the simple pipeline. ~13-25 s and roughly 5-10x the token cost per question.
+
+See `dev_docs/CREWAI_PIPELINE_REVIEW.md` for why the original crew was rebuilt.
 
 ### Why BigQuery Public Data?
 - Free tier for portfolio projects

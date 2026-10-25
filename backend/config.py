@@ -1,8 +1,8 @@
 """
 Configuration management for Text-to-SQL backend.
 Environment variables are loaded from the process environment first, then from
-.env.local (project root or backend/), so the app works both in Docker and when
-started locally from the backend/ directory.
+.env / .env.local (project root or backend/), so the app works both in Docker
+and when started locally from the backend/ directory.
 """
 
 from pathlib import Path
@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     cors_allow_headers: list[str] = ["*"]
 
     # ========================================================================
+    # Pipeline Configuration
+    # ========================================================================
+    # "simple": one LLM call per question (agents/simplified_pipeline.py)
+    # "crew": CrewAI multi-agent flow with planner, SQL developer and analyst
+    #         agents (agents/data_crew.py) - slower, but adds written insights
+    # Requests may override this per call via ChatRequest.pipeline.
+    pipeline_mode: Literal["simple", "crew"] = "simple"
+
+    # ========================================================================
     # OpenAI Configuration
     # ========================================================================
     # Required values default to "" so the API can start in a "degraded" state
@@ -79,8 +88,14 @@ class Settings(BaseSettings):
     cache_max_results: int = 10
 
     model_config = SettingsConfigDict(
-        # Later files take priority; missing files are ignored.
-        env_file=(PROJECT_ROOT / ".env.local", BACKEND_DIR / ".env.local"),
+        # Later files take priority; missing files are ignored. .env is the
+        # file Docker Compose reads, so local runs share the same settings.
+        env_file=(
+            PROJECT_ROOT / ".env",
+            PROJECT_ROOT / ".env.local",
+            BACKEND_DIR / ".env",
+            BACKEND_DIR / ".env.local",
+        ),
         case_sensitive=False,
         extra="ignore",  # Ignore extra environment variables
     )

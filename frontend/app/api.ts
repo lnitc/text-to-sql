@@ -20,15 +20,21 @@ export interface ChartData {
   title?: string;
 }
 
+export type PipelineName = 'simple' | 'crew';
+
 export interface AgentResponse {
   thought_process: string;
   sql_query: string;
   chart: ChartData;
   execution_time_ms?: number;
+  pipeline?: PipelineName;
+  insights?: string[];
+  follow_up_questions?: string[];
 }
 
 export interface ChatRequest {
   user_query: string;
+  pipeline?: PipelineName;
 }
 
 export interface ErrorResponse {
@@ -42,12 +48,14 @@ export interface HealthStatus {
   reachable: boolean;
   status?: 'ok' | 'degraded' | 'error';
   message?: string;
+  default_pipeline?: PipelineName;
 }
 
-export async function sendQuery(query: string): Promise<AgentResponse> {
+export async function sendQuery(query: string, pipeline?: PipelineName): Promise<AgentResponse> {
   try {
     const response = await apiClient.post<AgentResponse>('/api/chat', {
       user_query: query,
+      pipeline,
     } as ChatRequest);
     return response.data;
   } catch (error) {

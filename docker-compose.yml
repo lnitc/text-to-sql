@@ -38,6 +38,10 @@ services:
       BQ_QUERY_TIMEOUT_SECONDS: ${BQ_QUERY_TIMEOUT_SECONDS:-30}
       BQ_MAX_RESULTS_ROWS: ${BQ_MAX_RESULTS_ROWS:-1000}
       
+      # Pipeline selection (simple | crew) and CrewAI telemetry opt-out
+      PIPELINE_MODE: ${PIPELINE_MODE:-simple}
+      CREWAI_DISABLE_TELEMETRY: ${CREWAI_DISABLE_TELEMETRY:-true}
+
       # FastAPI Configuration
       BACKEND_PORT: ${BACKEND_PORT:-8000}
       ENVIRONMENT: ${ENVIRONMENT:-development}

@@ -1,521 +1,526 @@
 """
-CrewAI agents and tasks for Text-to-SQL pipeline.
+CrewAI multi-agent Text-to-SQL pipeline (PIPELINE_MODE=crew).
 
-This module defines three specialized agents that work together:
-1. SQL Developer Agent: Writes BigQuery SQL from natural language questions
-2. Data Executor Agent: Executes SQL and handles errors
-3. Data Visualizer Agent: Formats results for visualization
+A CrewAI Flow orchestrates three agents plus deterministic code steps:
 
-The crew orchestrates their collaboration to deliver a complete response.
+    plan ──► write_sql ──► check_sql ──► execute ──► analyze
+     │          ▲              │            │
+     │          └──── retry ───┴────────────┘   (error fed back; bounded)
+     └──► not answerable
+
+- Planner agent: interprets the question against the schema and decides
+  whether and how it can be answered (tables, filters, grouping, chart).
+- SQL developer agent: writes GoogleSQL from the plan; when a check fails it
+  gets the exact BigQuery error back and fixes its own query.
+- check_sql / execute (code, not agents): the read-only guard, a free
+  BigQuery dry run, then execution with the byte cap and result conversion
+  shared with the simple pipeline (agents/common.py).
+- Analyst agent: reads the actual result rows and writes the answer,
+  insights and follow-up questions.
+
+Every agent returns a Pydantic model (structured output), so nothing is
+scraped out of free text. Agents never delegate to each other: the Flow
+decides what runs next, which keeps cost and latency bounded.
 """
 
-from typing import Any
-from crewai import Agent, Task, Crew
-from crewai.tools import tool
-import logging
+import os
+
+# CrewAI sends anonymous usage telemetry by default; opt out unless the
+# operator configured otherwise. Must be set before crewai is imported.
+os.environ.setdefault("CREWAI_DISABLE_TELEMETRY", "true")
+os.environ.setdefault("CREWAI_TRACING_ENABLED", "false")
+
+import asyncio
+import datetime
 import json
+import logging
+import re
+import time
+from typing import Any, Literal
+
+from crewai import LLM, Agent
+from crewai.events.event_listener import event_listener as _crewai_event_listener
+from crewai.flow.flow import Flow, listen, or_, router, start
 from pydantic import BaseModel, Field
 
 from config import settings
 from tools import create_bigquery_tool
-from schemas.bigquery_schema import (
-    format_schema_for_agent,
-    PRODUCTS_SCHEMA,
-    ORDER_ITEMS_SCHEMA,
+from agents.common import (
+    MAX_DISPLAY_ROWS,
+    RELATIONSHIPS,
+    SQL_RULES,
+    extract_sql,
+    format_chart_data,
+    schemas_text,
+    summarize,
+    validate_read_only_sql,
 )
+from agents.simplified_pipeline import describe_llm_error
 from schemas.models import ChartData
 
 logger = logging.getLogger(__name__)
 
+# CrewAI's global console listener prints Rich panels for every agent run
+# regardless of Agent(verbose=...); only show them when debugging.
+_crewai_event_listener.formatter.verbose = settings.debug
+
+
+# Times the SQL developer is sent back after its query fails a check
+MAX_SQL_FIX_ATTEMPTS = 2
+
+# Result rows shown to the analyst agent (keeps the prompt small)
+ANALYST_SAMPLE_ROWS = 50
+ANALYST_SAMPLE_CHARS = 8000
+
+# Overall time budget; the frontend gives up after 120 s
+FLOW_TIMEOUT_SECONDS = 110
+
 
 # ============================================================================
-# Tool Definitions (for CrewAI)
+# Structured agent outputs
 # ============================================================================
 
-class ExecuteBigQueryInput(BaseModel):
-    """Input for execute_bigquery tool."""
-    sql_query: str = Field(..., description="SQL query to execute")
+
+class QueryPlan(BaseModel):
+    """Planner agent output."""
+
+    answerable: bool = Field(
+        description="False only if these tables clearly cannot answer the question"
+    )
+    reason: str = Field(
+        default="",
+        description="If not answerable: a short explanation for the user",
+    )
+    alternative_questions: list[str] = Field(
+        default_factory=list,
+        description="If not answerable: 2-3 related questions the data can answer",
+    )
+    tables: list[str] = Field(default_factory=list, description="Tables the query needs")
+    approach: str = Field(
+        default="",
+        description=(
+            "Precise query recipe: joins, filters (with exact date logic), grouping, "
+            "measures with aliases, ordering and row limit. Note any interpretation "
+            "made for a vague question."
+        ),
+    )
+    chart: Literal["bar", "line", "pie", "table"] = Field(
+        default="table",
+        description=(
+            "bar: compare categories (<=30 rows); line: trend over time; "
+            "pie: share of a whole (<=8 slices); table: detailed rows"
+        ),
+    )
 
 
-class DataToolkit:
-    """Toolkit of tools available to agents."""
+class SQLDraft(BaseModel):
+    """SQL developer agent output."""
 
-    def __init__(self, bq_tool):
-        self.bq_tool = bq_tool
+    sql: str = Field(description="The final, validated BigQuery SQL query")
+    notes: str = Field(default="", description="One sentence on how the query works")
 
-    def get_tools(self):
-        """Return list of tools for CrewAI agents."""
-        return [
-            self.execute_bigquery,
-            self.get_products_schema,
-            self.get_order_items_schema,
-        ]
 
-    @tool("execute_bigquery")
-    def execute_bigquery(self, sql_query: str) -> str:
-        """
-        Execute a SQL query against BigQuery.
+class Analysis(BaseModel):
+    """Analyst agent output."""
 
-        Args:
-            sql_query: SQL query to execute
+    summary: str = Field(
+        description="Direct answer to the question in 1-3 sentences with concrete numbers"
+    )
+    insights: list[str] = Field(
+        default_factory=list,
+        description="2-4 short findings that are visible in the result rows",
+    )
+    follow_up_questions: list[str] = Field(
+        default_factory=list,
+        description="3 short follow-up questions answerable from the same tables",
+    )
 
-        Returns:
-            JSON string with results or error
-        """
-        logger.info("[Agent Tool] Executing BigQuery query")
-        result = self.bq_tool.execute(sql_query, timeout_seconds=60)
 
+# ============================================================================
+# Flow
+# ============================================================================
+
+
+class CrewState(BaseModel):
+    """State carried through one run of the flow."""
+
+    question: str = ""
+    plan: QueryPlan | None = None
+    sql: str = ""
+    sql_attempts: int = 0
+    last_error: str = ""
+    result: dict[str, Any] | None = None
+    analysis: Analysis | None = None
+    outcome: Literal["pending", "answered", "unanswerable", "failed"] = "pending"
+    timings: dict[str, float] = Field(default_factory=dict)
+
+
+def _structured(output: Any, model: type[BaseModel]) -> Any:
+    """Return an agent's structured output, parsing its raw text as a fallback."""
+    if isinstance(getattr(output, "pydantic", None), model):
+        return output.pydantic
+    raw = getattr(output, "raw", "") or ""
+    match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not match:
+        raise ValueError(f"{model.__name__}: agent returned no structured output")
+    return model.model_validate_json(match.group(0))
+
+
+class TextToSQLFlow(Flow[CrewState]):
+    """Orchestrates the agents for a single question."""
+
+    # CrewAI's console event output is noisy (and its emoji crash some
+    # Windows consoles); the pipeline does its own logging.
+    suppress_flow_events = True
+
+    def __init__(self, pipeline: "CrewTextToSQLPipeline", **kwargs: Any):
+        super().__init__(**kwargs)
+        self._pipeline = pipeline
+
+    @start()
+    async def plan(self):
+        prompt = f"""Question: {self.state.question}
+
+Today's date: {datetime.date.today().isoformat()}
+
+Available tables:
+{self._pipeline.schemas}
+
+{RELATIONSHIPS}
+
+Decide whether one SQL query over these tables can answer the question. Mark it
+unanswerable only when the data clearly lacks what is needed; for a vague
+question, pick a sensible interpretation and state it in the approach. Then
+describe the approach precisely and choose the chart that best fits the result.
+Don't add filters the question doesn't ask for (e.g. on order status): revenue
+and order counts include every status unless the question says otherwise."""
+        step_start = time.time()
+        output = await self._pipeline.planner().kickoff_async(prompt, response_format=QueryPlan)
+        self.state.plan = _structured(output, QueryPlan)
+        self.state.timings["plan"] = time.time() - step_start
+        logger.info(
+            f"[Crew] Plan: answerable={self.state.plan.answerable} "
+            f"tables={self.state.plan.tables} chart={self.state.plan.chart}"
+        )
+
+    # Router labels must differ from handler names: CrewAI rejects a listener
+    # that would be triggered by its own name.
+
+    @router(plan)
+    def route_plan(self):
+        return "plan_ready" if self.state.plan.answerable else "not_answerable"
+
+    @listen(or_("plan_ready", "retry"))
+    async def write_sql(self):
+        self.state.sql_attempts += 1
+        plan = self.state.plan
+        previous = ""
+        if self.state.last_error:
+            previous = f"""
+Your previous query failed. Fix it so it runs.
+Previous SQL:
+{self.state.sql}
+Error:
+{self.state.last_error[:1500]}
+"""
+        prompt = f"""Question: {self.state.question}
+
+Today's date: {datetime.date.today().isoformat()}
+
+Plan from the planner:
+- Tables: {', '.join(plan.tables) or 'choose as needed'}
+- Approach: {plan.approach}
+
+Available tables:
+{self._pipeline.schemas}
+
+{RELATIONSHIPS}
+{previous}
+{SQL_RULES}
+
+Answer with the final query."""
+        step_start = time.time()
+        output = await self._pipeline.sql_developer().kickoff_async(prompt, response_format=SQLDraft)
+        self.state.sql = extract_sql(_structured(output, SQLDraft).sql)
+        self.state.timings[f"sql_{self.state.sql_attempts}"] = time.time() - step_start
+        logger.info(f"[Crew] SQL (attempt {self.state.sql_attempts}): {self.state.sql[:100]}...")
+
+    def _retry_or_fail(self, error: str) -> str:
+        self.state.last_error = error
+        if self.state.sql_attempts <= MAX_SQL_FIX_ATTEMPTS:
+            logger.info(f"[Crew] SQL check failed, sending it back: {error[:120]}")
+            return "retry"
+        return "execution_failed"
+
+    @router(write_sql)
+    async def check_sql(self):
+        guard_error = validate_read_only_sql(self.state.sql)
+        if guard_error:
+            return self._retry_or_fail(f"Rejected generated SQL: {guard_error}")
+        # Free dry run: catches unknown columns, type errors and syntax errors
+        # without running (or paying for) the query
+        dry_run = await asyncio.to_thread(self._pipeline.bq_tool.dry_run, self.state.sql)
+        if not dry_run["success"]:
+            return self._retry_or_fail(dry_run["error"])
+        return "sql_valid"
+
+    @router("sql_valid")
+    async def execute(self):
+        result = await asyncio.to_thread(
+            self._pipeline.bq_tool.execute,
+            self.state.sql,
+            timeout_seconds=settings.bq_query_timeout_seconds,
+        )
         if result["success"]:
-            logger.info(
-                f"[Agent Tool] Query successful. Rows: {result['row_count']}"
-            )
-            return json.dumps(
-                {
-                    "success": True,
-                    "data": result["data"][:10],  # Limit to 10 rows for readability
-                    "row_count": result["row_count"],
-                    "schema": result["schema"],
-                }
-            )
-        else:
-            logger.error(f"[Agent Tool] Query failed: {result['error']}")
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": result["error"],
-                }
-            )
+            self.state.result = result
+            self.state.last_error = ""
+            logger.info(f"[Crew] Query executed. Rows: {result['row_count']}")
+            return "results_ready"
 
-    @tool("get_products_schema")
-    def get_products_schema(self) -> str:
-        """Get schema for the products table."""
-        return format_schema_for_agent("products")
+        if result["error"].startswith("SQL Error"):
+            return self._retry_or_fail(result["error"])
+        self.state.last_error = result["error"]
+        return "execution_failed"
 
-    @tool("get_order_items_schema")
-    def get_order_items_schema(self) -> str:
-        """Get schema for the order_items table."""
-        return format_schema_for_agent("order_items")
+    @listen("results_ready")
+    async def analyze(self):
+        result = self.state.result
+        sample = json.dumps(result["data"][:ANALYST_SAMPLE_ROWS], default=str)
+        if len(sample) > ANALYST_SAMPLE_CHARS:
+            sample = sample[:ANALYST_SAMPLE_CHARS] + " ...(truncated)"
+        total_rows = result.get("total_rows") or result["row_count"]
+        prompt = f"""Question: {self.state.question}
 
+SQL that was run:
+{self.state.sql}
 
-# ============================================================================
-# Agent Definitions
-# ============================================================================
+Rows returned: {result['row_count']} (total matching: {total_rows})
+Columns: {', '.join(result['schema'])}
+Result rows (JSON, first {ANALYST_SAMPLE_ROWS} at most):
+{sample}
 
+Tables available for follow-up questions:
+{self._pipeline.schemas}
 
-def create_sql_developer_agent(tools: list) -> Agent:
-    """
-    Create SQL Developer Agent.
+Answer the question from these rows only; never invent numbers that are not in
+them. Follow-up questions must be answerable from the tables above. Format money with $ and thousands separators and round sensibly. If no
+rows came back, say that nothing matched and suggest how to broaden the question."""
+        step_start = time.time()
+        try:
+            output = await self._pipeline.analyst().kickoff_async(prompt, response_format=Analysis)
+            self.state.analysis = _structured(output, Analysis)
+            self.state.timings["analyze"] = time.time() - step_start
+        except Exception as e:
+            # The query already succeeded; fall back to the plain summary
+            # rather than failing the whole request.
+            logger.warning(f"[Crew] Analyst failed, using plain summary: {type(e).__name__}: {e}")
+        self.state.outcome = "answered"
 
-    Responsibility: Write BigQuery SQL queries from natural language questions.
-    - Analyzes user questions
-    - References table schemas
-    - Writes dialect-specific BigQuery SQL
-    - Includes helpful comments in SQL
-    """
-    from crewai import LLM
-    
-    return Agent(
-        role="SQL Developer",
-        goal=(
-            "Write clear, optimized BigQuery SQL queries that accurately answer "
-            "natural language questions about the thelook_ecommerce dataset. "
-            "Always reference table schemas and use correct BigQuery syntax."
-        ),
-        backstory=(
-            "You are an expert BigQuery SQL developer with deep knowledge of the "
-            "thelook_ecommerce dataset. You write clear, well-commented SQL that is "
-            "optimized for performance and readability. You understand the data model "
-            "and know how to join tables correctly."
-        ),
-        tools=tools,
-        llm=LLM(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
-            temperature=settings.openai_temperature,
-        ),
-        verbose=settings.debug,
-        allow_delegation=False,
-        max_iter=3,
-    )
+    @listen("not_answerable")
+    def unanswerable(self):
+        self.state.outcome = "unanswerable"
 
-
-def create_data_executor_agent(tools: list) -> Agent:
-    """
-    Create Data Executor Agent.
-
-    Responsibility: Execute SQL and handle errors.
-    - Takes SQL from SQL Developer
-    - Executes using BigQuery tool
-    - If query fails, provides error to SQL Developer for fixing
-    - Returns structured results
-    """
-    from crewai import LLM
-    
-    return Agent(
-        role="Data Executor",
-        goal=(
-            "Efficiently execute SQL queries against BigQuery and retrieve results. "
-            "If a query fails, analyze the error and work with the SQL Developer "
-            "to fix it. Return clean, validated data."
-        ),
-        backstory=(
-            "You are a meticulous data engineer responsible for executing queries "
-            "and ensuring data quality. You handle errors gracefully, understand "
-            "BigQuery error messages, and work collaboratively to resolve issues. "
-            "You validate that results make sense before returning them."
-        ),
-        tools=tools,
-        llm=LLM(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
-            temperature=settings.openai_temperature,
-        ),
-        verbose=settings.debug,
-        allow_delegation=True,  # Can delegate back to SQL Developer if query fails
-        max_iter=5,
-    )
-
-
-def create_data_visualizer_agent(tools: list) -> Agent:
-    """
-    Create Data Visualizer Agent.
-
-    Responsibility: Format results for visualization.
-    - Takes raw BigQuery results
-    - Decides on appropriate chart type
-    - Formats data for Recharts
-    - Writes clear explanation of findings
-    """
-    from crewai import LLM
-    
-    return Agent(
-        role="Data Visualizer",
-        goal=(
-            "Transform raw data into clear visualizations and explanations. "
-            "Choose the most appropriate chart type (bar, line, pie, table) and "
-            "format data in a way that tells a compelling story about the data."
-        ),
-        backstory=(
-            "You are a data visualization expert who understands how to communicate "
-            "complex data stories effectively. You know when to use bar charts for "
-            "comparisons, line charts for trends, pie charts for compositions, and "
-            "tables for detailed data. You write clear, concise explanations of findings."
-        ),
-        tools=tools,
-        llm=LLM(
-            model=settings.openai_model,
-            api_key=settings.openai_api_key,
-            temperature=settings.openai_temperature,
-        ),
-        verbose=settings.debug,
-        allow_delegation=False,
-        max_iter=3,
-    )
+    @listen("execution_failed")
+    def failed(self):
+        self.state.outcome = "failed"
 
 
 # ============================================================================
-# Task Definitions
+# Pipeline
 # ============================================================================
 
 
-def create_sql_generation_task(agent: Agent) -> Task:
-    """Create task for SQL generation."""
-    return Task(
-        description=(
-            "Based on the user's natural language question, write a BigQuery SQL query "
-            "that will answer it. "
-            "\n\nAvailable tables:"
-            "\n{schema_products}"
-            "\n{schema_order_items}"
-            "\n\nUser Question: {user_query}"
-            "\n\nRequirements:"
-            "- Use the correct BigQuery syntax and functions"
-            "- Include the full table path (e.g., `bigquery-public-data.thelook_ecommerce.products`)"
-            "- Add helpful comments in the SQL"
-            "- Make sure the query is valid BigQuery SQL"
-            "- Do not include LIMIT unless necessary for safety (max 10000 rows)"
-        ),
-        agent=agent,
-        expected_output=(
-            "A clear BigQuery SQL query that answers the user's question. "
-            "The query should be in a code block and well-commented."
-        ),
-    )
-
-
-def create_query_execution_task(agent: Agent) -> Task:
-    """Create task for query execution."""
-    return Task(
-        description=(
-            "Execute the SQL query generated by the SQL Developer using the "
-            "execute_bigquery tool. "
-            "\n\nIf the query fails:"
-            "1. Analyze the error message"
-            "2. Delegate back to the SQL Developer to fix the query"
-            "3. Retry execution with the corrected query"
-            "\n\nOnce successful, return the results in JSON format with:"
-            "- Row count"
-            "- Column names"
-            "- All data rows"
-        ),
-        agent=agent,
-        expected_output=(
-            "Successfully executed SQL results with row count, schema, and data. "
-            "If execution failed, detailed error message for the SQL Developer."
-        ),
-    )
-
-
-def create_visualization_task(agent: Agent) -> Task:
-    """Create task for result visualization."""
-    return Task(
-        description=(
-            "Format the query results for visualization and provide a clear explanation. "
-            "\n\nBased on the data:"
-            "1. Choose the most appropriate chart type (bar/line/pie/table)"
-            "2. Format the data for Recharts visualization"
-            "3. Extract key insights from the data"
-            "4. Write a brief, clear explanation of what the data shows"
-            "\n\nOutput format (JSON):"
-            "{"
-            '  "thought_process": "Clear explanation of findings...",'
-            '  "chart_type": "bar|line|pie|table",'
-            '  "data": [{"key": "value", ...}, ...],'
-            '  "x_axis_key": "column_name",'
-            '  "y_axis_key": "column_name",'
-            '  "title": "Chart Title"'
-            "}"
-        ),
-        agent=agent,
-        expected_output=(
-            "JSON object with visualization specification and insight explanation. "
-            "Chart type, data points, axis labels, and title all included."
-        ),
-    )
-
-
-# ============================================================================
-# Crew Creation and Execution
-# ============================================================================
-
-
-class TextToSQLCrew:
+def _apply_preferred_chart(chart: ChartData, preferred: str) -> ChartData:
     """
-    Orchestrates the Text-to-SQL pipeline using CrewAI.
+    Honor the planner's chart choice where the data supports it.
 
-    Workflow:
-    1. SQL Developer writes SQL from user question
-    2. Data Executor runs SQL and handles errors
-    3. Data Visualizer formats results and explains findings
+    format_chart_data picks a chart from the data's shape; the planner knows
+    the intent (e.g. "share of" -> pie), so it may refine that choice.
+    """
+    if preferred == "table" and chart.chart_type != "table":
+        return chart.model_copy(update={"chart_type": "table", "data": chart.data[:MAX_DISPLAY_ROWS]})
+    if preferred == "pie" and chart.chart_type == "bar" and len(chart.data) <= 8:
+        values = [row.get(chart.y_axis_key) for row in chart.data]
+        if all(isinstance(v, (int, float)) and v >= 0 for v in values):
+            return chart.model_copy(update={"chart_type": "pie"})
+    return chart
+
+
+class CrewTextToSQLPipeline:
+    """
+    Multi-agent Text-to-SQL pipeline built on a CrewAI Flow.
+
+    Exposes the same execute_async contract as SimplifiedTextToSQLPipeline,
+    plus insights and follow-up questions from the analyst agent.
     """
 
     def __init__(self, project_id: str):
         """
-        Initialize the crew.
+        Initialize the pipeline.
 
         Args:
             project_id: GCP project ID for BigQuery access
         """
         self.project_id = project_id
-        self.bq_tool = create_bigquery_tool(project_id)
-        self.toolkit = DataToolkit(self.bq_tool)
+        self.bq_tool = create_bigquery_tool(
+            project_id,
+            max_results=settings.bq_max_results_rows,
+            credentials_path=settings.resolved_credentials_path(),
+            max_bytes_billed=settings.bq_max_bytes_billed,
+        )
+        self.schemas = schemas_text()
+        logger.info(f"[CrewPipeline] Initialized for project: {project_id}")
 
-        # Create tools list for agents
-        self.tools = self.toolkit.get_tools()
+    # Agents are cheap to construct and hold per-run state, so each request
+    # gets fresh instances instead of sharing them across concurrent requests.
 
-        # Create agents
-        self.sql_developer = create_sql_developer_agent(self.tools)
-        self.data_executor = create_data_executor_agent(self.tools)
-        self.data_visualizer = create_data_visualizer_agent(self.tools)
-
-        # Create tasks
-        self.sql_task = create_sql_generation_task(self.sql_developer)
-        self.exec_task = create_query_execution_task(self.data_executor)
-        self.viz_task = create_visualization_task(self.data_visualizer)
-
-        # Create crew
-        self.crew = Crew(
-            agents=[self.sql_developer, self.data_executor, self.data_visualizer],
-            tasks=[self.sql_task, self.exec_task, self.viz_task],
-            verbose=settings.debug,
-            memory=True,  # Maintain context across tasks
-            max_rpm=10,  # Rate limiting for LLM API
+    def _llm(self, temperature: float) -> LLM:
+        return LLM(
+            model=settings.openai_model,
+            api_key=settings.openai_api_key,
+            temperature=temperature,
+            max_tokens=settings.openai_max_tokens,
+            timeout=60,
         )
 
-        logger.info("[TextToSQLCrew] Initialized")
+    def planner(self) -> Agent:
+        return Agent(
+            role="Analytics Planner",
+            goal="Turn a business question into a precise, answerable query plan",
+            backstory=(
+                "You are a senior analytics engineer who knows the thelook_ecommerce "
+                "dataset well. You translate loosely worded business questions into "
+                "exact definitions: which tables, which filters, which measures."
+            ),
+            llm=self._llm(temperature=0),
+            allow_delegation=False,
+            max_iter=2,
+            max_execution_time=60,
+            verbose=settings.debug,
+        )
+
+    def sql_developer(self) -> Agent:
+        return Agent(
+            role="BigQuery SQL Developer",
+            goal="Write a correct, efficient GoogleSQL query that implements the plan",
+            backstory=(
+                "You are an expert in BigQuery's GoogleSQL dialect, including its "
+                "date and timestamp functions. You write simple, readable queries "
+                "and fix errors precisely when told what failed."
+            ),
+            llm=self._llm(temperature=0),
+            allow_delegation=False,
+            max_iter=2,
+            max_execution_time=60,
+            verbose=settings.debug,
+        )
+
+    def analyst(self) -> Agent:
+        return Agent(
+            role="Data Analyst",
+            goal="Explain what query results mean for the question that was asked",
+            backstory=(
+                "You are a data analyst who writes crisp, accurate findings for "
+                "business stakeholders, always grounded in the numbers at hand."
+            ),
+            llm=self._llm(temperature=0.3),
+            allow_delegation=False,
+            max_iter=2,
+            max_execution_time=60,
+            verbose=settings.debug,
+        )
 
     async def execute_async(self, user_query: str) -> dict[str, Any]:
         """
-        Execute the complete pipeline (async version for FastAPI).
+        Run the multi-agent flow for one question.
 
         Args:
             user_query: Natural language question
 
         Returns:
-            dict with keys:
-            - success (bool)
-            - thought_process (str)
-            - sql_query (str)
-            - chart (ChartData)
-            - error (str): Only if success is False
+            dict with success status, SQL query, chart data, insights and
+            follow-up questions (same shape as the simplified pipeline)
         """
-        import time
-
         start_time = time.time()
+        flow = TextToSQLFlow(self)
+        logger.info(f"[Crew] Processing query: {user_query[:100]}...")
 
         try:
-            logger.info(f"[TextToSQLCrew] Starting async pipeline for query: {user_query[:100]}...")
-
-            # Prepare inputs for the crew
-            inputs = {
-                "user_query": user_query,
-                "schema_products": format_schema_for_agent("products"),
-                "schema_order_items": format_schema_for_agent("order_items"),
-            }
-
-            # Execute crew asynchronously
-            result = await self.crew.kickoff_async(inputs=inputs)
-
-            execution_time = (time.time() - start_time) * 1000
-            logger.info(f"[TextToSQLCrew] Async pipeline completed in {execution_time:.2f}ms")
-
-            # Parse result
-            result_str = str(result)
-
+            await asyncio.wait_for(
+                flow.kickoff_async(inputs={"question": user_query}),
+                timeout=FLOW_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
             return {
-                "success": True,
-                "thought_process": result_str[:500],
-                "sql_query": self._extract_sql_from_result(result_str),
-                "chart": self._extract_chart_from_result(result_str),
-                "execution_time_ms": execution_time,
+                "success": False,
+                "error": f"Multi-agent pipeline timeout after {FLOW_TIMEOUT_SECONDS} seconds",
+                "sql_query": flow.state.sql,
+                "execution_time_ms": (time.time() - start_time) * 1000,
             }
-
         except Exception as e:
-            execution_time = (time.time() - start_time) * 1000
-            error_msg = f"Crew execution failed: {type(e).__name__}: {str(e)}"
-
-            logger.error(f"[TextToSQLCrew] {error_msg}")
-
+            error_msg = f"Pipeline error: {describe_llm_error(e)}"
+            logger.error(f"[Crew] {error_msg}")
             return {
                 "success": False,
                 "error": error_msg,
-                "execution_time_ms": execution_time,
+                "sql_query": flow.state.sql,
+                "execution_time_ms": (time.time() - start_time) * 1000,
             }
 
-    def execute(self, user_query: str) -> dict[str, Any]:
-        """
-        Execute the complete pipeline (sync version).
-
-        Args:
-            user_query: Natural language question
-
-        Returns:
-            dict with keys:
-            - success (bool)
-            - thought_process (str)
-            - sql_query (str)
-            - chart (ChartData)
-            - error (str): Only if success is False
-        """
-        import time
-
-        start_time = time.time()
-
-        try:
-            logger.info(f"[TextToSQLCrew] Starting pipeline for query: {user_query[:100]}...")
-
-            # Prepare inputs for the crew
-            inputs = {
-                "user_query": user_query,
-                "schema_products": format_schema_for_agent("products"),
-                "schema_order_items": format_schema_for_agent("order_items"),
-            }
-
-            # Execute crew (orchestrates all tasks)
-            result = self.crew.kickoff(inputs=inputs)
-
-            execution_time = (time.time() - start_time) * 1000
-            logger.info(f"[TextToSQLCrew] Pipeline completed in {execution_time:.2f}ms")
-
-            # Parse result (in Phase 2, we'll get structured output from agents)
-            # For now, parse the final output from the visualizer agent
-            result_str = str(result)
-
-            return {
-                "success": True,
-                "thought_process": result_str[:500],  # First 500 chars
-                "sql_query": self._extract_sql_from_result(result_str),
-                "chart": self._extract_chart_from_result(result_str),
-                "execution_time_ms": execution_time,
-            }
-
-        except Exception as e:
-            execution_time = (time.time() - start_time) * 1000
-            error_msg = f"Crew execution failed: {type(e).__name__}: {str(e)}"
-
-            logger.error(f"[TextToSQLCrew] {error_msg}")
-
-            return {
-                "success": False,
-                "error": error_msg,
-                "execution_time_ms": execution_time,
-            }
-
-    def _extract_sql_from_result(self, result: str) -> str:
-        """Extract SQL query from crew result."""
-        # This is a simple extraction; in production, parse more carefully
-        lines = result.split("\n")
-        for i, line in enumerate(lines):
-            if "SELECT" in line.upper():
-                # Found start of SQL, collect until semicolon
-                sql_lines = []
-                for j in range(i, len(lines)):
-                    sql_lines.append(lines[j])
-                    if ";" in lines[j]:
-                        break
-                return "\n".join(sql_lines)
-
-        return "SELECT * FROM `bigquery-public-data.thelook_ecommerce.products` LIMIT 5"
-
-    def _extract_chart_from_result(self, result: str) -> ChartData:
-        """Extract and parse chart data from crew result."""
-        # Try to find JSON in result
-        import json as json_module
-
-        start_idx = result.find("{")
-        if start_idx >= 0:
-            end_idx = result.rfind("}") + 1
-            if end_idx > start_idx:
-                try:
-                    chart_dict = json_module.loads(result[start_idx:end_idx])
-                    return ChartData(
-                        chart_type=chart_dict.get("chart_type", "table"),
-                        data=chart_dict.get("data", []),
-                        x_axis_key=chart_dict.get("x_axis_key", "x"),
-                        y_axis_key=chart_dict.get("y_axis_key", "y"),
-                        title=chart_dict.get("title", "Results"),
-                    )
-                except (json_module.JSONDecodeError, ValueError):
-                    pass
-
-        # Fallback chart
-        return ChartData(
-            chart_type="table",
-            data=[],
-            x_axis_key="value",
-            y_axis_key="count",
-            title="Query Results",
+        state = flow.state
+        execution_time = (time.time() - start_time) * 1000
+        logger.info(
+            f"[Crew] Finished ({state.outcome}) in {execution_time / 1000:.1f}s; steps: "
+            + ", ".join(f"{name}={secs:.1f}s" for name, secs in state.timings.items())
         )
 
+        if state.outcome == "unanswerable":
+            return {
+                "success": True,
+                "thought_process": state.plan.reason
+                or "This question can't be answered from the available tables.",
+                "sql_query": "",
+                "chart": ChartData(
+                    chart_type="table", data=[], x_axis_key="value",
+                    y_axis_key="count", title="Not answerable",
+                ),
+                "follow_up_questions": state.plan.alternative_questions,
+                "execution_time_ms": execution_time,
+            }
 
-def create_text_to_sql_crew(project_id: str) -> TextToSQLCrew:
+        if state.outcome != "answered":
+            return {
+                "success": False,
+                "error": state.last_error or "Multi-agent pipeline did not produce a result",
+                "sql_query": state.sql,
+                "execution_time_ms": execution_time,
+            }
+
+        chart = format_chart_data(state.result["data"], state.result["schema"])
+        chart = _apply_preferred_chart(chart, state.plan.chart)
+        analysis = state.analysis
+
+        return {
+            "success": True,
+            "thought_process": analysis.summary
+            if analysis
+            else summarize(user_query, state.result, chart, corrected=state.sql_attempts > 1),
+            "sql_query": state.sql,
+            "chart": chart,
+            "insights": analysis.insights if analysis else [],
+            "follow_up_questions": analysis.follow_up_questions if analysis else [],
+            "execution_time_ms": execution_time,
+        }
+
+
+def create_crew_pipeline(project_id: str) -> CrewTextToSQLPipeline:
     """
-    Factory function to create Text-to-SQL crew.
+    Factory function to create the multi-agent pipeline.
 
     Args:
         project_id: GCP project ID
 
     Returns:
-        Initialized TextToSQLCrew instance
+        Initialized CrewTextToSQLPipeline instance
     """
-    return TextToSQLCrew(project_id=project_id)
+    return CrewTextToSQLPipeline(project_id=project_id)
