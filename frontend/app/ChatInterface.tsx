@@ -3,16 +3,22 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useChatStore, Message } from './store';
 import { ChatMessage } from './ChatMessage';
-import { Send, Trash2, Download, Moon, Sun, Sidebar, Clock, Star, BarChart3 } from 'lucide-react';
-import { sendQuery, checkHealth } from './api';
+import { Send, Trash2, Download, Moon, Sun, Clock, Star, BarChart3, SlidersHorizontal } from 'lucide-react';
+import { sendQuery, checkHealth, API_BASE_URL } from './api';
 import { useMessagePersistence } from './hooks/useMessagePersistence';
 import { useDarkMode } from './hooks/useDarkMode';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useFavorites } from './hooks/useFavorites';
 import { FavoritesPanel } from './components/FavoritesPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { AnalyticsDashboard } from './components/AnalyticsDashboard';
+import { QueryParamsEditor } from './components/QueryParamsEditor';
 
-type SidebarPanel = 'favorites' | 'history' | 'analytics' | null;
+type SidebarPanel = 'favorites' | 'history' | 'analytics' | 'builder' | null;
+
+// Must match the backend's ChatRequest.user_query max_length
+const MAX_QUERY_LENGTH = 1000;
+const HEALTH_RETRY_MS = 5000;
 
 export const ChatInterface: React.FC = () => {
   const { messages, isLoading, addMessage, removeMessage, clearMessages, setIsLoading } = useChatStore();
@@ -21,24 +27,49 @@ export const ChatInterface: React.FC = () => {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>(null);
   const { downloadConversation } = useMessagePersistence();
+  const { recordQuery } = useFavorites();
   const { isDark, toggleDarkMode } = useDarkMode();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Setup keyboard shortcuts
-  useKeyboardShortcuts([]);
+  useKeyboardShortcuts();
 
-  // Check backend health on mount
+  // Escape (see useKeyboardShortcuts) closes the open sidebar panel
   useEffect(() => {
+    const closePanel = () => setSidebarPanel(null);
+    window.addEventListener('closePanel', closePanel);
+    return () => window.removeEventListener('closePanel', closePanel);
+  }, []);
+
+  // Check backend health on mount, retrying until it is ready (the backend
+  // can take several seconds to start, especially under Docker)
+  useEffect(() => {
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
     const checkBackend = async () => {
-      const isHealthy = await checkHealth();
-      setBackendReady(isHealthy);
-      if (!isHealthy) {
-        setBackendError(
-          'Backend is not responding. Make sure FastAPI server is running on port 8000.'
-        );
+      const health = await checkHealth();
+      if (cancelled) return;
+
+      const isReady = health.reachable && health.status === 'ok';
+      setBackendReady(isReady);
+      if (isReady) {
+        setBackendError(null);
+        return;
       }
+      setBackendError(
+        health.reachable
+          ? `Backend is running but not ready: ${health.message ?? 'unknown problem'}`
+          : `Backend is not responding at ${API_BASE_URL}. Make sure the FastAPI server is running. Retrying...`
+      );
+      retryTimer = setTimeout(checkBackend, HEALTH_RETRY_MS);
     };
     checkBackend();
+
+    return () => {
+      cancelled = true;
+      clearTimeout(retryTimer);
+    };
   }, []);
 
   // Auto-scroll to bottom
@@ -93,6 +124,7 @@ export const ChatInterface: React.FC = () => {
         timestamp: new Date(),
       };
       addMessage(assistantMessage);
+      recordQuery(userQuery, response.chart.data.length);
     } catch (error) {
       // Remove loading message
       removeMessage(loadingMessageId);
@@ -106,6 +138,7 @@ export const ChatInterface: React.FC = () => {
         timestamp: new Date(),
       };
       addMessage(errorMessage);
+      recordQuery(userQuery);
     } finally {
       setIsLoading(false);
     }
@@ -151,7 +184,7 @@ export const ChatInterface: React.FC = () => {
               )}
               <button
                 onClick={toggleDarkMode}
-                className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`}
                 title="Toggle dark mode"
               >
                 {isDark ? <Sun size={20} className="text-yellow-500" /> : <Moon size={20} className="text-gray-600" />}
@@ -209,6 +242,7 @@ export const ChatInterface: React.FC = () => {
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 placeholder="Ask a question about the data..."
+                maxLength={MAX_QUERY_LENGTH}
                 disabled={isLoading || !backendReady}
                 className={`flex-1 px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition ${
                   isDark
@@ -218,6 +252,7 @@ export const ChatInterface: React.FC = () => {
               />
               <button
                 type="submit"
+                title="Send"
                 disabled={isLoading || !backendReady || !inputValue.trim()}
                 className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2 font-medium"
               >
@@ -241,10 +276,7 @@ export const ChatInterface: React.FC = () => {
               {messages.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => {
-                    clearMessages();
-                    setBackendError(null);
-                  }}
+                  onClick={clearMessages}
                   className={`px-4 py-3 rounded-lg transition flex items-center gap-2 ${
                     isDark
                       ? 'bg-gray-700 text-gray-200 hover:bg-gray-600'
@@ -257,7 +289,7 @@ export const ChatInterface: React.FC = () => {
               )}
             </form>
             <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} mt-2`}>
-              Backend: {backendReady ? 'Connected' : 'Disconnected'} | API Base: {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}
+              Backend: {backendReady ? 'Connected' : 'Disconnected'} | API Base: {API_BASE_URL}
             </p>
           </div>
         </div>
@@ -303,7 +335,17 @@ export const ChatInterface: React.FC = () => {
           <BarChart3 size={20} />
         </button>
 
-        {/* Query Builder button hidden for now - will be enabled in future phase */}
+        <button
+          onClick={() => toggleSidebar('builder')}
+          className={`p-3 rounded-lg transition ${
+            sidebarPanel === 'builder'
+              ? isDark ? 'bg-green-600 text-white' : 'bg-green-500 text-white'
+              : isDark ? 'hover:bg-gray-800 text-gray-400 hover:text-gray-200' : 'hover:bg-gray-100 text-gray-600'
+          }`}
+          title="Query Builder (testing)"
+        >
+          <SlidersHorizontal size={20} />
+        </button>
       </div>
 
       {/* Sidebar Panel */}
@@ -317,6 +359,13 @@ export const ChatInterface: React.FC = () => {
           )}
           {sidebarPanel === 'analytics' && (
             <AnalyticsDashboard isDark={isDark} />
+          )}
+          {sidebarPanel === 'builder' && (
+            <QueryParamsEditor
+              onApply={handleApplyQuery}
+              isDark={isDark}
+              onClose={() => setSidebarPanel(null)}
+            />
           )}
         </div>
       )}

@@ -1,11 +1,19 @@
 """
 Configuration management for Text-to-SQL backend.
-Environment variables are loaded from .env.local file.
+Environment variables are loaded from the process environment first, then from
+.env.local (project root or backend/), so the app works both in Docker and when
+started locally from the backend/ directory.
 """
 
-from pydantic_settings import BaseSettings
-from typing import Literal, Optional
+from pathlib import Path
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from langchain_openai import ChatOpenAI
+
+
+BACKEND_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
@@ -24,7 +32,11 @@ class Settings(BaseSettings):
     # CORS Configuration (for Next.js frontend)
     # ========================================================================
     frontend_url: str = "http://localhost:3000"
-    cors_origins: list[str] = ["http://localhost:3000", "http://frontend:3000"]
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://frontend:3000",
+    ]
     cors_allow_credentials: bool = True
     cors_allow_methods: list[str] = ["GET", "POST", "OPTIONS"]
     cors_allow_headers: list[str] = ["*"]
@@ -32,8 +44,10 @@ class Settings(BaseSettings):
     # ========================================================================
     # OpenAI Configuration
     # ========================================================================
-    openai_api_key: str
-    openai_model: Literal["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"] = "gpt-4o-mini"
+    # Required values default to "" so the API can start in a "degraded" state
+    # and report what is missing via /health instead of crashing on import.
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
     openai_temperature: float = 0.7
     openai_max_tokens: int = 2000
     openai_monthly_budget: float = 15.0
@@ -41,12 +55,15 @@ class Settings(BaseSettings):
     # ========================================================================
     # Google Cloud Configuration
     # ========================================================================
-    gcp_project_id: str
-    google_application_credentials: str  # Path to GCP service account JSON
+    gcp_project_id: str = ""
+    google_application_credentials: str = ""  # Path to GCP service account JSON
     bq_dataset_project: str = "bigquery-public-data"
     bq_dataset_id: str = "thelook_ecommerce"
     bq_query_timeout_seconds: int = 30
     bq_max_results_rows: int = 1000
+    # Hard cap on bytes a single query may scan (cost guard). 10 GB by default;
+    # every thelook_ecommerce table is far smaller than this.
+    bq_max_bytes_billed: int = 10 * 1024**3
 
     # ========================================================================
     # Logging Configuration
@@ -61,11 +78,12 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 1800  # 30 minutes
     cache_max_results: int = 10
 
-    class Config:
-        """Pydantic configuration."""
-        env_file = ".env.local"
-        case_sensitive = False
-        extra = "ignore"  # Ignore extra environment variables
+    model_config = SettingsConfigDict(
+        # Later files take priority; missing files are ignored.
+        env_file=(PROJECT_ROOT / ".env.local", BACKEND_DIR / ".env.local"),
+        case_sensitive=False,
+        extra="ignore",  # Ignore extra environment variables
+    )
 
     def get_llm(self):
         """
@@ -82,6 +100,28 @@ class Settings(BaseSettings):
             timeout=30,
             max_retries=2,
         )
+
+    def resolved_credentials_path(self) -> str | None:
+        """
+        Locate the GCP service account key file.
+
+        Relative paths are resolved against the project root. If the configured
+        path does not exist (e.g. the Docker path /secrets/gcp-key.json when
+        running locally), fall back to <project root>/gcp-key.json.
+
+        Returns:
+            Absolute path to an existing key file, or None if none was found
+        """
+        candidates = []
+        if self.google_application_credentials:
+            path = Path(self.google_application_credentials)
+            candidates.append(path if path.is_absolute() else PROJECT_ROOT / path)
+        candidates.append(PROJECT_ROOT / "gcp-key.json")
+
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
 
 
 # Create global settings instance
@@ -100,23 +140,18 @@ def validate_settings() -> tuple[bool, str]:
     # Check required fields
     if not settings.openai_api_key:
         errors.append("OPENAI_API_KEY is not set")
+    elif not settings.openai_api_key.startswith("sk-"):
+        errors.append("OPENAI_API_KEY does not appear to be valid (should start with 'sk-')")
 
     if not settings.gcp_project_id:
         errors.append("GCP_PROJECT_ID is not set")
 
-    if not settings.google_application_credentials:
-        errors.append("GOOGLE_APPLICATION_CREDENTIALS is not set")
-
-    if not settings.openai_api_key.startswith("sk-"):
-        errors.append("OPENAI_API_KEY does not appear to be valid (should start with 'sk-')")
-
-    # Check file existence
-    import os
-    if settings.google_application_credentials:
-        if not os.path.exists(settings.google_application_credentials):
-            errors.append(
-                f"GCP credentials file not found: {settings.google_application_credentials}"
-            )
+    # Credentials may also come from gcloud Application Default Credentials,
+    # so only complain when a key file was configured but can't be found.
+    if settings.google_application_credentials and not settings.resolved_credentials_path():
+        errors.append(
+            f"GCP credentials file not found: {settings.google_application_credentials}"
+        )
 
     if errors:
         return False, "; ".join(errors)

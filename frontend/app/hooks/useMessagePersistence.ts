@@ -7,54 +7,66 @@ import { formatDate } from '../utils/export';
 const STORAGE_KEY = 'text-to-sql-messages';
 const MAX_MESSAGES = 100;
 
+let hydrated = false;
+
+/** "Processing..." placeholders are transient and must not survive a reload. */
+const isPlaceholder = (msg: Message) =>
+  msg.type === 'assistant' && !msg.agentResponse && !msg.error;
+
+function saveMessages(msgs: Message[]) {
+  try {
+    // Only keep last MAX_MESSAGES
+    const toSave = msgs.filter((msg) => !isPlaceholder(msg)).slice(-MAX_MESSAGES);
+    if (toSave.length === 0) {
+      localStorage.removeItem(STORAGE_KEY);
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+    }
+  } catch (error) {
+    console.error('Failed to persist messages:', error);
+  }
+}
+
+/**
+ * Load persisted messages into the store once, then save on every change
+ * (including clearing, so cleared conversations stay cleared after reload).
+ */
+function hydrateFromStorage() {
+  if (hydrated) return;
+  hydrated = true;
+
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Message[];
+      // Convert date strings back to Date objects
+      const withDates = parsed
+        .filter((msg) => !isPlaceholder(msg))
+        .map((msg) => ({ ...msg, timestamp: new Date(msg.timestamp) }));
+      useChatStore.setState({ messages: withDates });
+    }
+  } catch (error) {
+    console.error('Failed to load messages:', error);
+  }
+
+  useChatStore.subscribe((state, prev) => {
+    if (state.messages !== prev.messages) {
+      saveMessages(state.messages);
+    }
+  });
+}
+
 /**
  * Hook for persisting messages to localStorage
  * Auto-loads on mount and auto-saves on message changes
  */
 export function useMessagePersistence() {
-  const { messages, addMessage, clearMessages } = useChatStore();
+  const { messages, clearMessages } = useChatStore();
 
   // Load persisted messages on mount
   useEffect(() => {
-    loadMessages();
+    hydrateFromStorage();
   }, []);
-
-  // Save messages whenever they change
-  useEffect(() => {
-    if (messages.length > 0) {
-      saveMessages(messages);
-    }
-  }, [messages]);
-
-  const saveMessages = (msgs: Message[]) => {
-    try {
-      // Only keep last MAX_MESSAGES
-      const toSave = msgs.slice(-MAX_MESSAGES);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-    } catch (error) {
-      console.error('Failed to persist messages:', error);
-    }
-  };
-
-  const loadMessages = () => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as Message[];
-        // Convert date strings back to Date objects
-        const withDates = parsed.map((msg) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp),
-        }));
-
-        // Clear current messages and add persisted ones
-        clearMessages();
-        withDates.forEach((msg) => addMessage(msg));
-      }
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-    }
-  };
 
   const clearPersistedMessages = () => {
     try {
@@ -95,7 +107,6 @@ export function useMessagePersistence() {
   };
 
   return {
-    loadMessages,
     clearPersistedMessages,
     exportMessages,
     downloadConversation,

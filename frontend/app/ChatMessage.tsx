@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Message } from './store';
 import { ChartRenderer } from './ChartRenderer';
-import { Copy, ChevronDown, ChevronUp, Download, FileJson, FileText, Star, AlertCircle, Lightbulb } from 'lucide-react';
+import { Copy, ChevronDown, ChevronUp, FileJson, FileText, Star, AlertCircle, Lightbulb } from 'lucide-react';
 import { downloadCSV, downloadJSON, copyToClipboard } from './utils/export';
 import { useFavorites } from './hooks/useFavorites';
 import { parseErrorMessage, isRecoverableError } from './utils/errorHandler';
@@ -18,10 +18,13 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
   const [exporting, setExporting] = useState(false);
   const [showSaveForm, setShowSaveForm] = useState(false);
   const [newTag, setNewTag] = useState('');
-  const { toggleFavorite, getFavorites, addQuery, addQueryAsFavorite, addTag } = useFavorites();
+  const { toggleFavorite, getFavorites, addQueryAsFavorite, addTag } = useFavorites();
 
   const favorites = getFavorites();
-  const isFavorited = message.userQuery && favorites.some((f: any) => f.query === message.userQuery);
+  const favorited = message.userQuery
+    ? favorites.find((f) => f.query === message.userQuery)
+    : undefined;
+  const isFavorited = !!favorited;
 
   const handleCopySql = () => {
     if (message.agentResponse?.sql_query) {
@@ -35,7 +38,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
     if (message.agentResponse?.chart.data) {
       setExporting(true);
       try {
-        downloadCSV(message.agentResponse.chart.data, message.agentResponse.chart);
+        downloadCSV(message.agentResponse.chart.data);
       } finally {
         setExporting(false);
       }
@@ -143,8 +146,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
       <div className="max-w-4xl w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
         {/* Thought Process */}
         <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">Analysis</p>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{message.agentResponse.thought_process}</p>
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+            Analysis
+            {message.agentResponse.execution_time_ms !== undefined && (
+              <span className="ml-2 font-normal text-gray-500 dark:text-gray-400">
+                · {(message.agentResponse.execution_time_ms / 1000).toFixed(1)}s
+              </span>
+            )}
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-line">{message.agentResponse.thought_process}</p>
         </div>
 
         {/* SQL Query */}
@@ -229,7 +239,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
               <div className="space-y-2">
                 <button
                   onClick={() => {
-                    const favorited = favorites.find((f: any) => f.query === message.userQuery);
                     if (favorited) {
                       // Already favorited, remove it
                       toggleFavorite(favorited.id);
@@ -256,9 +265,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                         placeholder="Add a tag..."
                         value={newTag}
                         onChange={e => setNewTag(e.target.value)}
-                        onKeyPress={e => {
+                        onKeyDown={e => {
                           if (e.key === 'Enter' && newTag.trim()) {
-                            const favorited = favorites.find((f: any) => f.query === message.userQuery);
                             if (favorited) {
                               addTag(favorited.id, newTag.trim());
                               setNewTag('');
@@ -270,7 +278,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ message }) => {
                       <button
                         onClick={() => {
                           if (newTag.trim()) {
-                            const favorited = favorites.find((f: any) => f.query === message.userQuery);
                             if (favorited) {
                               addTag(favorited.id, newTag.trim());
                               setNewTag('');

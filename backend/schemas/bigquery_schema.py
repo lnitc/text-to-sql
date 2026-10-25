@@ -2,7 +2,8 @@
 BigQuery schema definitions for the thelook_ecommerce public dataset.
 
 This module contains the hardcoded schema for the tables we'll be querying.
-In production, this could be fetched dynamically from BigQuery.
+Field names were verified against the live dataset metadata; keep them in sync
+if the dataset changes. In production, this could be fetched dynamically.
 
 Reference: https://console.cloud.google.com/bigquery?project=bigquery-public-data&d=thelook_ecommerce
 """
@@ -19,9 +20,14 @@ PRODUCTS_SCHEMA = {
             "description": "Product ID (primary key)",
         },
         {
+            "name": "cost",
+            "type": "FLOAT64",
+            "description": "Cost to produce in USD",
+        },
+        {
             "name": "category",
             "type": "STRING",
-            "description": "Product category",
+            "description": "Product category (e.g. Jeans, Tops & Tees, Accessories)",
         },
         {
             "name": "name",
@@ -39,14 +45,19 @@ PRODUCTS_SCHEMA = {
             "description": "Retail price in USD",
         },
         {
-            "name": "cost",
-            "type": "FLOAT64",
-            "description": "Cost to produce",
+            "name": "department",
+            "type": "STRING",
+            "description": "Department: 'Men' or 'Women'",
         },
         {
-            "name": "distribution_centers",
+            "name": "sku",
             "type": "STRING",
-            "description": "Distribution center codes",
+            "description": "Stock keeping unit",
+        },
+        {
+            "name": "distribution_center_id",
+            "type": "INTEGER",
+            "description": "Distribution center ID",
         },
     ],
 }
@@ -65,12 +76,17 @@ ORDER_ITEMS_SCHEMA = {
         {
             "name": "order_id",
             "type": "INTEGER",
-            "description": "Order ID (foreign key)",
+            "description": "Order ID (foreign key to orders.order_id)",
+        },
+        {
+            "name": "user_id",
+            "type": "INTEGER",
+            "description": "User ID (foreign key to users.id)",
         },
         {
             "name": "product_id",
             "type": "INTEGER",
-            "description": "Product ID (foreign key to products)",
+            "description": "Product ID (foreign key to products.id)",
         },
         {
             "name": "inventory_item_id",
@@ -78,14 +94,9 @@ ORDER_ITEMS_SCHEMA = {
             "description": "Inventory item ID",
         },
         {
-            "name": "user_id",
-            "type": "INTEGER",
-            "description": "User ID (customer)",
-        },
-        {
-            "name": "sale_price",
-            "type": "FLOAT64",
-            "description": "Sale price in USD",
+            "name": "status",
+            "type": "STRING",
+            "description": "Order status: 'Processing', 'Shipped', 'Complete', 'Returned' or 'Cancelled'",
         },
         {
             "name": "created_at",
@@ -108,9 +119,9 @@ ORDER_ITEMS_SCHEMA = {
             "description": "When order item was returned (if applicable)",
         },
         {
-            "name": "status",
-            "type": "STRING",
-            "description": "Order item status (Pending, Processing, Shipped, Delivered, Returned, Cancelled)",
+            "name": "sale_price",
+            "type": "FLOAT64",
+            "description": "Sale price in USD (use SUM(sale_price) for revenue)",
         },
     ],
 }
@@ -129,12 +140,17 @@ ORDERS_SCHEMA = {
         {
             "name": "user_id",
             "type": "INTEGER",
-            "description": "User ID (customer)",
+            "description": "User ID (foreign key to users.id)",
         },
         {
             "name": "status",
             "type": "STRING",
-            "description": "Order status",
+            "description": "Order status: 'Processing', 'Shipped', 'Complete', 'Returned' or 'Cancelled'",
+        },
+        {
+            "name": "gender",
+            "type": "STRING",
+            "description": "Customer gender: 'M' or 'F'",
         },
         {
             "name": "created_at",
@@ -191,9 +207,14 @@ USERS_SCHEMA = {
             "description": "Email address",
         },
         {
-            "name": "city",
+            "name": "age",
+            "type": "INTEGER",
+            "description": "Age in years",
+        },
+        {
+            "name": "gender",
             "type": "STRING",
-            "description": "City",
+            "description": "Gender: 'M' or 'F'",
         },
         {
             "name": "state",
@@ -201,9 +222,19 @@ USERS_SCHEMA = {
             "description": "State",
         },
         {
+            "name": "street_address",
+            "type": "STRING",
+            "description": "Street address",
+        },
+        {
             "name": "postal_code",
             "type": "STRING",
             "description": "Postal code",
+        },
+        {
+            "name": "city",
+            "type": "STRING",
+            "description": "City",
         },
         {
             "name": "country",
@@ -221,24 +252,14 @@ USERS_SCHEMA = {
             "description": "Longitude",
         },
         {
-            "name": "gender",
+            "name": "traffic_source",
             "type": "STRING",
-            "description": "Gender",
-        },
-        {
-            "name": "birth_date",
-            "type": "DATE",
-            "description": "Birth date",
+            "description": "Acquisition channel (e.g. Search, Organic, Facebook, Email, Display)",
         },
         {
             "name": "created_at",
             "type": "TIMESTAMP",
             "description": "When user account was created",
-        },
-        {
-            "name": "updated_at",
-            "type": "TIMESTAMP",
-            "description": "When user profile was last updated",
         },
     ],
 }

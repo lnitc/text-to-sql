@@ -13,10 +13,7 @@ interface ExportOptions {
 /**
  * Convert chart data to CSV format
  */
-export function convertToCSV(
-  data: Record<string, unknown>[],
-  _chartData: ChartData
-): string {
+export function convertToCSV(data: Record<string, unknown>[]): string {
   if (!data || data.length === 0) {
     return '';
   }
@@ -25,9 +22,12 @@ export function convertToCSV(
   const rows = data.map((row) =>
     headers.map((header) => {
       const value = row[header];
-      // Escape quotes and wrap in quotes if contains comma
-      if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+      // Escape quotes and wrap in quotes if contains a comma, quote or newline
+      if (typeof value === 'string' && /[",\r\n]/.test(value)) {
         return `"${value.replace(/"/g, '""')}"`;
+      }
+      if (value !== null && typeof value === 'object') {
+        return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
       }
       return value ?? '';
     })
@@ -44,10 +44,9 @@ export function convertToCSV(
  */
 export function downloadCSV(
   data: Record<string, unknown>[],
-  chartData: ChartData,
   options: ExportOptions = {}
 ): void {
-  const csv = convertToCSV(data, chartData);
+  const csv = convertToCSV(data);
   const filename =
     options.filename ||
     `export-${options.timestamp !== false ? new Date().toISOString().split('T')[0] : 'data'}.csv`;

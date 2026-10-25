@@ -14,8 +14,7 @@ export const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
   onSelectQuery,
   isDark,
 }) => {
-  const { getFavorites, deleteQuery, searchQueries, removeTag, addTag } =
-    useFavorites();
+  const { getFavorites, deleteQuery, searchQueries, removeTag } = useFavorites();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
 

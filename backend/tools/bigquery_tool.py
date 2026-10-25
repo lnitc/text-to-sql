@@ -9,12 +9,35 @@ This module provides a LangChain-compatible tool that:
 """
 
 from typing import Optional, Any
-import json
+import base64
+import datetime
+import decimal
 from google.cloud import bigquery
 from google.cloud.exceptions import GoogleCloudError, BadRequest
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _to_json_value(value: Any) -> Any:
+    """
+    Convert BigQuery cell values into JSON/chart-friendly Python types.
+
+    NUMERIC/BIGNUMERIC come back as Decimal (which Pydantic serializes as a
+    string, breaking charts), DATE/TIMESTAMP as date/datetime objects, and
+    BYTES as bytes. REPEATED/RECORD fields are converted recursively.
+    """
+    if isinstance(value, decimal.Decimal):
+        return float(value)
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
+    if isinstance(value, dict):
+        return {k: _to_json_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_json_value(v) for v in value]
+    return value
 
 
 class BigQueryTool:
@@ -28,13 +51,23 @@ class BigQueryTool:
     - Schema caching and inspection
     """
 
-    def __init__(self, project_id: str, max_results: int = 10000):
+    def __init__(
+        self,
+        project_id: str,
+        max_results: int = 10000,
+        credentials_path: Optional[str] = None,
+        max_bytes_billed: Optional[int] = None,
+    ):
         """
         Initialize BigQuery tool.
         
         Args:
             project_id: GCP project ID
             max_results: Maximum rows to return per query (safety limit)
+            credentials_path: Service account JSON key file. If omitted,
+                Application Default Credentials are used.
+            max_bytes_billed: Queries that would scan more bytes than this
+                fail instead of running (cost guard)
         
         Raises:
             ValueError: If project_id is empty
@@ -44,7 +77,13 @@ class BigQueryTool:
         
         self.project_id = project_id
         self.max_results = max_results
-        self.client = bigquery.Client(project=project_id)
+        self.max_bytes_billed = max_bytes_billed
+        if credentials_path:
+            self.client = bigquery.Client.from_service_account_json(
+                credentials_path, project=project_id
+            )
+        else:
+            self.client = bigquery.Client(project=project_id)
         self._schema_cache = {}
         
         logger.info(f"[BigQueryTool] Initialized for project: {project_id}")
@@ -69,6 +108,7 @@ class BigQueryTool:
             - data (list): Rows as dicts (empty if failed)
             - row_count (int): Number of rows returned
             - schema (list): Column names
+            - total_rows (int): Rows in the full result (may exceed row_count)
             - error (str): Error message if failed
             - execution_time_ms (float): Query execution time
         
@@ -98,6 +138,8 @@ class BigQueryTool:
 
             # Configure query job
             query_config = bigquery.QueryJobConfig()
+            if self.max_bytes_billed:
+                query_config.maximum_bytes_billed = self.max_bytes_billed
             if job_config:
                 # Apply any custom config
                 for key, value in job_config.items():
@@ -108,23 +150,24 @@ class BigQueryTool:
 
             # Execute query
             query_job = self.client.query(query, job_config=query_config)
-            results = query_job.result(timeout=timeout_seconds)
+            # max_results stops the client from downloading rows we'd discard
+            results = query_job.result(
+                timeout=timeout_seconds, max_results=self.max_results
+            )
 
             # Extract field names from schema
             field_names = [field.name for field in results.schema]
             
-            # Convert results to list of dicts
-            rows = []
-            for row in results:
-                row_dict = {key: value for key, value in zip(field_names, row)}
-                rows.append(row_dict)
-
-                # Safety limit
-                if len(rows) >= self.max_results:
-                    logger.warning(
-                        f"[BigQueryTool] Result set truncated at {self.max_results} rows"
-                    )
-                    break
+            # Convert results to list of JSON-friendly dicts
+            rows = [
+                {key: _to_json_value(value) for key, value in zip(field_names, row)}
+                for row in results
+            ]
+            total_rows = results.total_rows if results.total_rows is not None else len(rows)
+            if total_rows > len(rows):
+                logger.warning(
+                    f"[BigQueryTool] Result set truncated at {len(rows)} of {total_rows} rows"
+                )
 
             execution_time = (time.time() - start_time) * 1000
 
@@ -138,6 +181,7 @@ class BigQueryTool:
                 "data": rows,
                 "row_count": len(rows),
                 "schema": field_names,
+                "total_rows": total_rows,
                 "error": None,
                 "execution_time_ms": execution_time,
             }
@@ -309,15 +353,27 @@ class BigQueryTool:
 
 
 # Create a singleton instance wrapper for LangChain tool integration
-def create_bigquery_tool(project_id: str, max_results: int = 10000) -> BigQueryTool:
+def create_bigquery_tool(
+    project_id: str,
+    max_results: int = 10000,
+    credentials_path: Optional[str] = None,
+    max_bytes_billed: Optional[int] = None,
+) -> BigQueryTool:
     """
     Factory function to create BigQuery tool instance.
     
     Args:
         project_id: GCP project ID
         max_results: Maximum rows to return
+        credentials_path: Optional service account JSON key file
+        max_bytes_billed: Optional per-query scan limit in bytes
     
     Returns:
         Configured BigQueryTool instance
     """
-    return BigQueryTool(project_id=project_id, max_results=max_results)
+    return BigQueryTool(
+        project_id=project_id,
+        max_results=max_results,
+        credentials_path=credentials_path,
+        max_bytes_billed=max_bytes_billed,
+    )

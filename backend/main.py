@@ -12,9 +12,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import httpx
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import settings, validate_settings
 from schemas.models import (
@@ -144,15 +146,35 @@ async def log_requests(request: Request, call_next):
 # ============================================================================
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+# Registered for Starlette's base class so routing errors (404/405) use the
+# same ErrorResponse shape as errors raised by our endpoints.
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """Handle HTTP exceptions."""
     return JSONResponse(
         status_code=exc.status_code,
         content=ErrorResponse(
             error="HTTPError",
-            message=exc.detail,
+            message=str(exc.detail),
             status_code=exc.status_code,
+        ).model_dump(),
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return request validation errors (422) in the standard ErrorResponse shape."""
+    messages = []
+    for error in exc.errors():
+        field = ".".join(str(part) for part in error.get("loc", []) if part != "body")
+        messages.append(f"{field}: {error.get('msg')}" if field else str(error.get("msg")))
+    return JSONResponse(
+        status_code=422,
+        content=ErrorResponse(
+            error="ValidationError",
+            message="; ".join(messages) or "Invalid request",
+            status_code=422,
         ).model_dump(),
     )
 
@@ -191,6 +213,9 @@ async def health_check() -> HealthResponse:
     """
     # Validate settings
     is_valid, message = validate_settings()
+    if is_valid and pipeline is None:
+        is_valid = False
+        message = "Text-to-SQL pipeline failed to initialize. Check the backend logs."
     status_value = "ok" if is_valid else "degraded"
 
     return HealthResponse(
@@ -346,28 +371,20 @@ def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
 
-    openapi_schema = {
-        "openapi": "3.0.2",
-        "info": {
-            "title": settings.app_name,
-            "version": settings.app_version,
-            "description": "Text-to-SQL Agentic Data Analyst API",
-            "contact": {
-                "name": "Your Name",
-                "url": "https://github.com",
-            },
-        },
-        "servers": [
+    # Build from the routes directly: calling app.openapi() here would recurse
+    # into this function, since it replaces app.openapi below.
+    app.openapi_schema = get_openapi(
+        title=settings.app_name,
+        version=settings.app_version,
+        description="Text-to-SQL Agentic Data Analyst API",
+        routes=app.routes,
+        servers=[
             {
                 "url": f"http://localhost:{settings.backend_port}",
                 "description": "Local development server",
             }
         ],
-        "paths": app.openapi()["paths"],
-        "components": app.openapi()["components"],
-    }
-
-    app.openapi_schema = openapi_schema
+    )
     return app.openapi_schema
 
 

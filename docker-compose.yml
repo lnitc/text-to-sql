@@ -30,7 +30,8 @@ services:
       OPENAI_MONTHLY_BUDGET: ${OPENAI_MONTHLY_BUDGET:-15}
       
       # GCP Configuration
-      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS}
+      # Must match the container path of the key mounted under volumes below
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-key.json
       GCP_PROJECT_ID: ${GCP_PROJECT_ID}
       BQ_DATASET_PROJECT: ${BQ_DATASET_PROJECT:-bigquery-public-data}
       BQ_DATASET_ID: ${BQ_DATASET_ID:-thelook_ecommerce}
@@ -95,7 +96,9 @@ services:
       - "3000:3000"
     environment:
       # API Configuration
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://backend:8000}
+      # Called from the user's browser, so it must be a host-reachable URL
+      # (the "backend" hostname only resolves inside the Docker network)
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
       NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-development}
       # Next.js Configuration
       NODE_ENV: ${ENVIRONMENT:-development}

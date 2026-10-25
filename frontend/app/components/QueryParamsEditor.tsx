@@ -19,9 +19,23 @@ interface QueryParamsEditorProps {
 const COMMON_PARAMS = [
   { key: 'limit', type: 'number', description: 'Limit results' },
   { key: 'offset', type: 'number', description: 'Skip results' },
-  { key: 'dateRange', type: 'date', description: 'Date range filter' },
+  { key: 'startDate', type: 'date', description: 'Start date' },
+  { key: 'endDate', type: 'date', description: 'End date' },
   { key: 'includeMetrics', type: 'boolean', description: 'Include metrics' },
 ];
+
+// Must stay below the backend's 1000-character user_query limit
+const MAX_QUERY_LENGTH = 1000;
+
+const newParamId = () => Math.random().toString(36).slice(2, 11);
+
+/** "startDate" / "start_date" -> "start date" */
+const formatKey = (key: string) =>
+  key
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase();
 
 export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
   onApply,
@@ -35,7 +49,7 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
     setParams([
       ...params,
       {
-        id: Math.random().toString(36).substr(2, 9),
+        id: newParamId(),
         key: '',
         value: '',
         type: 'string',
@@ -53,36 +67,45 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
     value: string
   ) => {
     setParams(
-      params.map(p =>
-        p.id === id
-          ? { ...p, [field]: field === 'type' ? value : value }
-          : p
-      )
+      params.map(p => {
+        if (p.id !== id) return p;
+        // A value entered for one type (e.g. text) is usually invalid for
+        // another (e.g. a date input), so reset it when the type changes
+        if (field === 'type') {
+          return { ...p, type: value as QueryParam['type'], value: value === 'boolean' ? 'true' : '' };
+        }
+        return { ...p, [field]: value };
+      })
     );
   };
 
+  /**
+   * The result is sent to the LLM as a natural-language question, so render
+   * parameters as readable constraints: "Top brands (limit: 10, start date: 2024-01-01)"
+   */
   const buildQuery = (): string => {
     if (!baseQuery.trim()) return '';
 
-    let query = baseQuery.trim();
-    const filledParams = params.filter(p => p.key && p.value);
+    const query = baseQuery.trim();
+    const filledParams = params.filter(p => p.key.trim() && p.value.trim());
 
     if (filledParams.length === 0) return query;
 
     const paramStrings = filledParams.map(p => {
-      if (p.type === 'number') return `${p.key}=${p.value}`;
-      if (p.type === 'boolean') return `${p.key}=${p.value === 'true'}`;
-      if (p.type === 'date') return `${p.key}="${p.value}"`;
-      return `${p.key}="${p.value}"`;
+      const value = p.type === 'boolean' ? (p.value === 'true' ? 'yes' : 'no') : p.value.trim();
+      return `${formatKey(p.key)}: ${value}`;
     });
 
-    return query + (query.includes('?') ? '&' : '?') + paramStrings.join('&');
+    return `${query} (${paramStrings.join(', ')})`;
   };
 
+  const builtQuery = buildQuery();
+  const isTooLong = builtQuery.length > MAX_QUERY_LENGTH;
+  const canApply = builtQuery.trim().length > 0 && !isTooLong;
+
   const handleApply = () => {
-    const finalQuery = buildQuery();
-    if (finalQuery.trim()) {
-      onApply(finalQuery);
+    if (canApply) {
+      onApply(builtQuery);
       onClose();
     }
   };
@@ -109,8 +132,9 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
         </h2>
         <button
           onClick={onClose}
-          className={`p-1 rounded hover:bg-gray-300 ${
-            isDark ? 'hover:bg-gray-700' : ''
+          title="Close"
+          className={`p-1 rounded ${
+            isDark ? 'hover:bg-gray-700 text-gray-300' : 'hover:bg-gray-200 text-gray-600'
           }`}
         >
           <X size={20} />
@@ -131,8 +155,9 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
           <textarea
             value={baseQuery}
             onChange={e => setBaseQuery(e.target.value)}
-            placeholder="Enter your base query..."
+            placeholder="e.g. Top 10 brands by revenue"
             rows={4}
+            maxLength={MAX_QUERY_LENGTH}
             className={`w-full px-3 py-2 rounded border text-sm resize-none ${
               isDark
                 ? 'border-gray-600 bg-gray-800 text-white placeholder-gray-500'
@@ -172,29 +197,44 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
                   placeholder="Key"
                   value={param.key}
                   onChange={e => updateParam(param.id, 'key', e.target.value)}
-                  className={`flex-1 px-2 py-1 rounded text-sm border ${
+                  className={`flex-1 min-w-0 px-2 py-1 rounded text-sm border ${
                     isDark
                       ? 'border-gray-600 bg-gray-800 text-white placeholder-gray-500'
                       : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'
                   } focus:outline-none focus:ring-2 focus:ring-blue-500`}
                 />
-                <input
-                  type={
-                    param.type === 'number'
-                      ? 'number'
-                      : param.type === 'date'
-                        ? 'date'
-                        : 'text'
-                  }
-                  placeholder="Value"
-                  value={param.value}
-                  onChange={e => updateParam(param.id, 'value', e.target.value)}
-                  className={`flex-1 px-2 py-1 rounded text-sm border ${
-                    isDark
-                      ? 'border-gray-600 bg-gray-800 text-white placeholder-gray-500'
-                      : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'
-                  } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                />
+                {param.type === 'boolean' ? (
+                  <select
+                    value={param.value}
+                    onChange={e => updateParam(param.id, 'value', e.target.value)}
+                    className={`flex-1 min-w-0 px-2 py-1 rounded text-sm border ${
+                      isDark
+                        ? 'border-gray-600 bg-gray-800 text-white'
+                        : 'border-gray-300 bg-white text-gray-900'
+                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  >
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                  </select>
+                ) : (
+                  <input
+                    type={
+                      param.type === 'number'
+                        ? 'number'
+                        : param.type === 'date'
+                          ? 'date'
+                          : 'text'
+                    }
+                    placeholder="Value"
+                    value={param.value}
+                    onChange={e => updateParam(param.id, 'value', e.target.value)}
+                    className={`flex-1 min-w-0 px-2 py-1 rounded text-sm border ${
+                      isDark
+                        ? 'border-gray-600 bg-gray-800 text-white placeholder-gray-500'
+                        : 'border-gray-300 bg-white text-gray-900 placeholder-gray-400'
+                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  />
+                )}
                 <select
                   value={param.type}
                   onChange={e => updateParam(param.id, 'type', e.target.value)}
@@ -211,6 +251,7 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
                 </select>
                 <button
                   onClick={() => removeParam(param.id)}
+                  title="Remove parameter"
                   className={`p-1 rounded transition ${
                     isDark
                       ? 'hover:bg-red-600 text-red-400'
@@ -242,9 +283,9 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
                       setParams([
                         ...params,
                         {
-                          id: Math.random().toString(36).substr(2, 9),
+                          id: newParamId(),
                           key: p.key,
-                          value: '',
+                          value: p.type === 'boolean' ? 'true' : '',
                           type: p.type as QueryParam['type'],
                         },
                       ]);
@@ -264,7 +305,7 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
         </div>
 
         {/* Preview */}
-        {buildQuery() && (
+        {builtQuery && (
           <div>
             <label
               className={`block text-sm font-medium mb-2 ${
@@ -280,8 +321,13 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
                   : 'bg-gray-100 text-gray-900 border border-gray-200'
               }`}
             >
-              <code>{buildQuery()}</code>
+              <code>{builtQuery}</code>
             </div>
+            {isTooLong && (
+              <p className="mt-1 text-xs text-red-500">
+                Query is {builtQuery.length} characters; the limit is {MAX_QUERY_LENGTH}.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -305,9 +351,9 @@ export const QueryParamsEditor: React.FC<QueryParamsEditorProps> = ({
         </button>
         <button
           onClick={handleApply}
-          disabled={!buildQuery().trim()}
+          disabled={!canApply}
           className={`flex-1 px-3 py-2 rounded font-medium transition ${
-            buildQuery().trim()
+            canApply
               ? isDark
                 ? 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
                 : 'bg-blue-500 hover:bg-blue-600 text-white cursor-pointer'

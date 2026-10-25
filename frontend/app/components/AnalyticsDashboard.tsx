@@ -14,33 +14,79 @@ import {
   Cell,
 } from 'recharts';
 import { TrendingUp, BarChart3, Clock } from 'lucide-react';
-import { useChatStore, Message } from '../store';
+import { useChatStore, Message, SavedQuery } from '../store';
 import { useFavorites } from '../hooks/useFavorites';
 
 interface AnalyticsDashboardProps {
   isDark: boolean;
 }
 
+const SQL_KEYWORDS: [string, RegExp][] = [
+  ['JOIN', /\bjoin\b/i],
+  ['WHERE', /\bwhere\b/i],
+  ['GROUP BY', /\bgroup\s+by\b/i],
+  ['ORDER BY', /\border\s+by\b/i],
+  ['WITH (CTE)', /^\s*with\b/i],
+];
+
+const StatCard: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+  isDark: boolean;
+}> = ({ icon, label, value, isDark }) => (
+  <div
+    className={`p-4 rounded-lg border ${
+      isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
+    }`}
+  >
+    <div className="flex items-center gap-3">
+      <div
+        className={`p-2 rounded ${
+          isDark
+            ? 'bg-gray-800 text-blue-400'
+            : 'bg-blue-100 text-blue-600'
+        }`}
+      >
+        {icon}
+      </div>
+      <div>
+        <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+          {label}
+        </p>
+        <p
+          className={`text-2xl font-bold ${
+            isDark ? 'text-white' : 'text-gray-900'
+          }`}
+        >
+          {value}
+        </p>
+      </div>
+    </div>
+  </div>
+);
+
 export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
   isDark,
 }) => {
   const { messages } = useChatStore();
-  const { getHistory } = useFavorites();
+  const { queries } = useFavorites();
 
   const chartColors = isDark
     ? ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#8b5cf6']
     : ['#2563eb', '#db2777', '#059669', '#d97706', '#7c3aed'];
 
   const analytics = useMemo(() => {
-    const history = getHistory();
+    const history = queries;
     const totalQueries = messages.filter(
       (m: Message) => m.type === 'user'
     ).length;
-    const successfulQueries = messages.filter(
-      (m: Message) => m.type === 'assistant' && m.agentResponse
-    ).length;
+    const responses = messages
+      .filter((m: Message) => m.type === 'assistant' && m.agentResponse)
+      .map((m: Message) => m.agentResponse!);
+    const successfulQueries = responses.length;
     const uniqueQueries = new Set(
-      history.map((h: any) => h.query.toLowerCase().trim())
+      history.map((h: SavedQuery) => h.query.toLowerCase().trim())
     ).size;
 
     const last7Days = Array.from({ length: 7 }, (_, i) => {
@@ -54,7 +100,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
 
     const queriesByDay = last7Days.map((day) => ({
       day,
-      queries: history.filter((h: any) => {
+      queries: history.filter((h: SavedQuery) => {
         const historyDate = new Date(h.lastUsed).toLocaleDateString('en-US', {
           month: 'short',
           day: 'numeric',
@@ -63,19 +109,15 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
       }).length,
     }));
 
+    // Count SQL features used in the generated queries (the saved questions
+    // are natural language, so they don't contain SQL keywords)
     const queryKeywords: Record<string, number> = {};
-    history.forEach((h: any) => {
-      const query = h.query.toLowerCase();
-      if (query.includes('select'))
-        queryKeywords['SELECT'] = (queryKeywords['SELECT'] || 0) + 1;
-      if (query.includes('where'))
-        queryKeywords['WHERE'] = (queryKeywords['WHERE'] || 0) + 1;
-      if (query.includes('group by'))
-        queryKeywords['GROUP BY'] = (queryKeywords['GROUP BY'] || 0) + 1;
-      if (query.includes('order by'))
-        queryKeywords['ORDER BY'] = (queryKeywords['ORDER BY'] || 0) + 1;
-      if (query.includes('join'))
-        queryKeywords['JOIN'] = (queryKeywords['JOIN'] || 0) + 1;
+    responses.forEach((r) => {
+      SQL_KEYWORDS.forEach(([name, pattern]) => {
+        if (pattern.test(r.sql_query)) {
+          queryKeywords[name] = (queryKeywords[name] || 0) + 1;
+        }
+      });
     });
 
     const queryTypeData = Object.entries(queryKeywords).map(([type, count]) => ({
@@ -83,8 +125,13 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
       value: count,
     }));
 
+    const timings = responses
+      .map((r) => r.execution_time_ms)
+      .filter((t): t is number => typeof t === 'number');
     const avgResponseTime =
-      successfulQueries > 0 ? (Math.random() * 3 + 1).toFixed(2) : '0.00';
+      timings.length > 0
+        ? `${(timings.reduce((sum, t) => sum + t, 0) / timings.length / 1000).toFixed(2)}s`
+        : '—';
 
     return {
       totalQueries,
@@ -98,43 +145,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
       queriesByDay,
       queryTypeData,
     };
-  }, [messages]);
-
-  const StatCard: React.FC<{
-    icon: React.ReactNode;
-    label: string;
-    value: string | number;
-  }> = ({ icon, label, value }) => (
-    <div
-      className={`p-4 rounded-lg border ${
-        isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
-      }`}
-    >
-      <div className="flex items-center gap-3">
-        <div
-          className={`p-2 rounded ${
-            isDark
-              ? 'bg-gray-800 text-blue-400'
-              : 'bg-blue-100 text-blue-600'
-          }`}
-        >
-          {icon}
-        </div>
-        <div>
-          <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-            {label}
-          </p>
-          <p
-            className={`text-2xl font-bold ${
-              isDark ? 'text-white' : 'text-gray-900'
-            }`}
-          >
-            {value}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  }, [messages, queries]);
 
   return (
     <div
@@ -169,21 +180,25 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
             icon={<TrendingUp size={20} />}
             label="Total Queries"
             value={analytics.totalQueries}
+            isDark={isDark}
           />
           <StatCard
             icon={<Clock size={20} />}
             label="Success Rate"
             value={`${analytics.successRate}%`}
+            isDark={isDark}
           />
           <StatCard
             icon={<BarChart3 size={20} />}
             label="Unique Queries"
             value={analytics.uniqueQueries}
+            isDark={isDark}
           />
           <StatCard
             icon={<Clock size={20} />}
             label="Avg Response"
-            value={`${analytics.avgResponseTime}s`}
+            value={analytics.avgResponseTime}
+            isDark={isDark}
           />
         </div>
 
@@ -253,7 +268,7 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                 isDark ? 'text-white' : 'text-gray-900'
               }`}
             >
-              Query Keywords
+              SQL Features Used
             </h3>
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>

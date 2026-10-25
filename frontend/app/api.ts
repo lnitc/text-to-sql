@@ -1,10 +1,12 @@
 import axios, { AxiosError } from 'axios';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000,
+  // SQL generation can be retried by the backend after a BigQuery error, so
+  // allow for a few LLM round-trips plus query execution.
+  timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -15,12 +17,14 @@ export interface ChartData {
   data: Record<string, unknown>[];
   x_axis_key: string;
   y_axis_key: string;
+  title?: string;
 }
 
 export interface AgentResponse {
   thought_process: string;
   sql_query: string;
   chart: ChartData;
+  execution_time_ms?: number;
 }
 
 export interface ChatRequest {
@@ -34,6 +38,12 @@ export interface ErrorResponse {
   details?: string;
 }
 
+export interface HealthStatus {
+  reachable: boolean;
+  status?: 'ok' | 'degraded' | 'error';
+  message?: string;
+}
+
 export async function sendQuery(query: string): Promise<AgentResponse> {
   try {
     const response = await apiClient.post<AgentResponse>('/api/chat', {
@@ -44,28 +54,35 @@ export async function sendQuery(query: string): Promise<AgentResponse> {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError<ErrorResponse>;
       const errorData = axiosError.response?.data;
-      
+
       // Try to extract message from error response
       let errorMessage = 'Failed to send query';
       if (errorData?.message) {
         errorMessage = errorData.message;
       } else if (errorData?.details) {
         errorMessage = errorData.details;
+      } else if (axiosError.code === 'ECONNABORTED') {
+        errorMessage = 'Request timeout: the backend took too long to respond';
+      } else if (!axiosError.response) {
+        // Wording matters: parseErrorMessage keys off "connection"/"timeout"
+        errorMessage = `Network connection error: unable to reach the backend at ${API_BASE_URL}`;
       } else if (axiosError.message) {
         errorMessage = axiosError.message;
       }
-      
+
       throw new Error(errorMessage);
     }
     throw error;
   }
 }
 
-export async function checkHealth(): Promise<boolean> {
+export async function checkHealth(): Promise<HealthStatus> {
   try {
-    const response = await apiClient.get('/health');
-    return response.status === 200;
+    const response = await apiClient.get<Omit<HealthStatus, 'reachable'>>('/health', {
+      timeout: 5000,
+    });
+    return { reachable: true, ...response.data };
   } catch {
-    return false;
+    return { reachable: false };
   }
 }

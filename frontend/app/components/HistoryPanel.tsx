@@ -11,7 +11,7 @@ interface HistoryPanelProps {
 }
 
 export const HistoryPanel: React.FC<HistoryPanelProps> = ({ onSelectQuery, isDark }) => {
-  const { getHistory, getFavorites, toggleFavorite, addQuery } = useFavorites();
+  const { getHistory, getFavorites, toggleFavorite } = useFavorites();
   const [searchTerm, setSearchTerm] = useState('');
 
   const history = getHistory();
@@ -27,8 +27,9 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ onSelectQuery, isDar
     return favorites.some((fav: SavedQuery) => fav.id === id);
   };
 
+  // History is recorded when a query is sent, not when it's selected here;
+  // adding it again on click created duplicate entries
   const handleSelectQuery = (query: string) => {
-    addQuery(query);
     onSelectQuery(query);
   };
 
