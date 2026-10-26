@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Star, Trash2, Copy, Search, X, Tag } from 'lucide-react';
+import { Star, Trash2, Search, X, Tag } from 'lucide-react';
 import { useFavorites } from '../hooks/useFavorites';
 import { SavedQuery } from '../store';
+import { CopyButton } from './CopyButton';
 
 interface FavoritesPanelProps {
   onSelectQuery: (query: string) => void;
@@ -32,11 +33,6 @@ export const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
   const handleSelectQuery = (query: string) => {
     onSelectQuery(query);
-  };
-
-  const handleCopyQuery = (e: React.MouseEvent, query: string) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(query);
   };
 
   const handleRemove = (e: React.MouseEvent, id: string) => {
@@ -201,17 +197,7 @@ export const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 
                 {/* Action Buttons */}
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition">
-                  <button
-                    onClick={e => handleCopyQuery(e, favorite.query)}
-                    className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded text-xs font-medium transition ${
-                      isDark
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                        : 'bg-blue-500 hover:bg-blue-600 text-white'
-                    }`}
-                  >
-                    <Copy size={12} />
-                    Copy
-                  </button>
+                  <CopyButton text={favorite.query} isDark={isDark} className="flex-1" />
                   <button
                     onClick={e => handleRemove(e, favorite.id)}
                     className={`flex items-center justify-center px-2 py-1 rounded text-xs font-medium transition ${

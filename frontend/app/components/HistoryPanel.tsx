@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Clock, Copy, Search, Star } from 'lucide-react';
+import { Clock, Search, Star } from 'lucide-react';
 import { useFavorites } from '../hooks/useFavorites';
 import { SavedQuery } from '../store';
+import { CopyButton } from './CopyButton';
 
 interface HistoryPanelProps {
   onSelectQuery: (query: string) => void;
@@ -31,11 +32,6 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ onSelectQuery, isDar
   // adding it again on click created duplicate entries
   const handleSelectQuery = (query: string) => {
     onSelectQuery(query);
-  };
-
-  const handleCopyQuery = (e: React.MouseEvent, query: string) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(query);
   };
 
   const handleToggleFavorite = (e: React.MouseEvent, id: string) => {
@@ -137,17 +133,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({ onSelectQuery, isDar
 
                 {/* Action Buttons */}
                 <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition">
-                  <button
-                    onClick={e => handleCopyQuery(e, item.query)}
-                    className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 rounded text-xs font-medium transition ${
-                      isDark
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                        : 'bg-blue-500 hover:bg-blue-600 text-white'
-                    }`}
-                  >
-                    <Copy size={12} />
-                    Copy
-                  </button>
+                  <CopyButton text={item.query} isDark={isDark} className="flex-1" />
                   <button
                     onClick={e => handleToggleFavorite(e, item.id)}
                     className={`flex items-center justify-center px-2 py-1 rounded text-xs font-medium transition ${
