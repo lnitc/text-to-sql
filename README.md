@@ -1,455 +1,545 @@
-# 🚀 Text-to-SQL Agentic Data Analyst
+# Text-to-SQL Data Analyst
 
-> **Status**: 🧪 **PROOF OF CONCEPT** - Active Development
-> 
-> This is a working prototype demonstrating enterprise-grade AI/ML and data engineering practices. **Testing is ongoing and some features are simplified for cost optimization.** The Query Builder feature is currently in testing and will be fully integrated in a future release.
+Ask questions about an e-commerce dataset in plain English and get answers as
+charts and tables. An LLM writes the SQL, Google BigQuery runs it, and a
+Next.js interface renders the result, with an optional multi-agent mode
+(CrewAI) that also explains what the numbers mean.
 
-## 📋 Overview
-
-**Text-to-SQL Agentic Data Analyst** is a full-stack generative AI application that transforms natural language questions into SQL queries, executes them against Google BigQuery, analyzes the results, and renders dynamic data visualizations. The application demonstrates production-grade data engineering, AI orchestration, and cloud architecture patterns.
-
-### What It Does
-1. **User asks a question in natural language** (e.g., "What were the top 3 product categories by revenue last month?")
-2. **AI agents generate and execute SQL** against BigQuery using CrewAI orchestration
-3. **Results are analyzed and formatted** into structured JSON responses
-4. **Frontend renders interactive visualizations** (charts, tables) using Recharts
-5. **Chat history and favorites** are persisted for the session
-
-### Example Flow
-```
-User: "How many orders were placed in the last 7 days?"
-                    ↓
-          [CrewAI SQL Agent]
-                    ↓
-          SQL: SELECT COUNT(DISTINCT order_id)...
-                    ↓
-          [BigQuery Execution]
-                    ↓
-          Result: 5,310 orders
-                    ↓
-          [Visualization Agent]
-                    ↓
-          Response: {"chart_type": "table", "data": [...]}
-                    ↓
-    [Next.js Frontend Renders Chart]
-```
+> **Status:** proof of concept, built as a portfolio project. Everything below
+> works locally (with or without Docker). It is not hardened for public
+> deployment: there is no login or rate limiting. See
+> [Security & Deployment](#-security--deployment) before exposing it to anyone.
 
 ---
 
-## 🏗️ Architecture
+## 📑 Contents
 
-### System Design
+- [Overview](#-overview)
+- [Features](#-features)
+- [How It Works](#%EF%B8%8F-how-it-works)
+- [Tech Stack](#-tech-stack)
+- [Getting Started](#-getting-started)
+- [Configuration Reference](#%EF%B8%8F-configuration-reference)
+- [API Reference](#-api-reference)
+- [Testing](#-testing)
+- [Project Structure](#-project-structure)
+- [Troubleshooting](#-troubleshooting)
+- [Performance & Costs](#-performance--costs)
+- [Security & Deployment](#-security--deployment)
+- [Known Limitations](#-known-limitations)
+- [Recommended for Implementation Features](#-recommended-for-implementation-features)
+- [Contributing](#-contributing)
+- [Development History](#-development-history)
+- [License](#-license)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Client (Browser)                         │
-│                   http://localhost:3000                      │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  Next.js 16 Frontend (React + TypeScript)              │ │
-│  │  ├─ Chat Interface (message history)                   │ │
-│  │  ├─ Query Input Form                                   │ │
-│  │  ├─ Chart Renderer (Recharts)                          │ │
-│  │  ├─ Favorites Panel (localStorage)                     │ │
-│  │  └─ Dark Mode Toggle                                   │ │
-│  └────────────────────────────────────────────────────────┘ │
-└────────────────┬────────────────────────────────────────────┘
-                 │ HTTP/CORS
-                 │ JSON Request/Response
-                 ↓
-┌────────────────────────────────────────────────────────────┐
-│                 Backend (Docker)                           │
-│              http://localhost:8000                          │
-│  ┌──────────────────────────────────────────────────────┐ │
-│  │  FastAPI Application (Python 3.11)                   │ │
-│  │  ├─ REST API Endpoints                               │ │
-│  │  ├─ Request Validation (Pydantic)                    │ │
-│  │  ├─ CORS Configuration                               │ │
-│  │  └─ Error Handling                                   │ │
-│  └────────────────┬─────────────────────────────────────┘ │
-│                   │                                        │
-│  ┌────────────────▼─────────────────────────────────────┐ │
-│  │  Text-to-SQL Pipeline (PIPELINE_MODE)                │ │
-│  │  ├─ simple (default): one LLM call writes the SQL    │ │
-│  │  └─ crew: CrewAI Flow with three agents              │ │
-│  │      ├─ Planner: interprets the question             │ │
-│  │      ├─ SQL Developer: writes and fixes the query    │ │
-│  │      └─ Analyst: writes insights and follow-ups      │ │
-│  │  Shared: read-only SQL guard, dry run, chart choice  │ │
-│  └────────────────┬─────────────────────────────────────┘ │
-│                   │                                        │
-│  ┌────────────────▼─────────────────────────────────────┐ │
-│  │  BigQuery Tool & Integration                         │ │
-│  │  ├─ SQL Execution                                    │ │
-│  │  ├─ Error Handling & Recovery                        │ │
-│  │  └─ Result Formatting                                │ │
-│  └────────────────────────────────────────────────────────┘ │
-└──────────────────┬─────────────────────────────────────────┘
-                   │ BigQuery API
-                   │ (Google Cloud)
-                   ↓
-      ┌────────────────────────────┐
-      │    Google BigQuery         │
-      │  (Public eCommerce Data)   │
-      │  - order_items             │
-      │  - products                │
-      │  - users                   │
-      │  - events                  │
-      └────────────────────────────┘
-```
+---
 
-### Technology Stack
+## 🔭 Overview
 
-**Frontend**
-- **Framework**: Next.js 16 (App Router, Turbopack)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS v4
-- **Visualization**: Recharts (Bar, Line, Pie, Table charts)
-- **State Management**: React Hooks + localStorage
-- **HTTP Client**: Axios
+You type a question such as *"What were the top 5 product categories by
+revenue last month?"* The app:
 
-**Backend**
-- **Framework**: FastAPI (Python 3.11)
-- **AI Orchestration**: CrewAI (multi-agent system)
-- **LLM**: OpenAI GPT-4o (can be switched to GPT-4-turbo for cost optimization)
-- **Database**: Google BigQuery (with langchain-google-community)
-- **Data Validation**: Pydantic
-- **Server**: Uvicorn
+1. **writes** a BigQuery SQL query for it using an OpenAI model,
+2. **checks** that the query is a single read-only `SELECT`,
+3. **runs** it against Google's public
+   [`thelook_ecommerce`](https://console.cloud.google.com/marketplace/product/bigquery-public-data/thelook-ecommerce)
+   dataset (orders, order items, products, users),
+4. **picks a visualization** (bar, line, pie or table) based on the shape of the
+   result, and
+5. **shows** the answer with the SQL it ran, ready to export.
 
-**Infrastructure**
-- **Containerization**: Docker & Docker Compose
-- **Cloud Platform**: Google Cloud Platform (GCP)
-- **Service Account**: GCP Service Account with BigQuery permissions
-- **Database**: BigQuery (bigquery-public-data.thelook_ecommerce)
+Two interchangeable pipelines produce the answer:
 
-**Development**
-- **Package Managers**: npm (frontend), pip (backend)
-- **Version Control**: Git
-- **API Documentation**: FastAPI Swagger UI
+| | **Simple** (default) | **Multi-agent** (CrewAI) |
+|---|---|---|
+| How | One LLM call writes the SQL | A planner, a SQL developer and an analyst agent, orchestrated by a CrewAI Flow |
+| Extras | — | Written findings, follow-up question suggestions, polite refusals for questions the data can't answer |
+| Typical time | ~3–7 s | ~13–18 s |
+| LLM calls | 1 (+1 per automatic fix) | 3 (+1 per automatic fix) |
+
+Switch between them per question with the **Multi-agent analysis** checkbox
+under the chat input.
 
 ---
 
 ## ✨ Features
 
-### Current Features (Phase 4.2)
+### Asking questions
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Chat Interface** | ✅ Complete | Natural language query input with streaming responses |
-| **SQL Generation** | ✅ Complete | AI-powered SQL query generation for BigQuery |
-| **Query Execution** | ✅ Complete | Direct BigQuery integration with error handling |
-| **Visualizations** | ✅ Complete | Dynamic charts (Bar, Line, Pie, Table) using Recharts |
-| **Query History** | ✅ Complete | Session-based history maintained in UI |
-| **Favorites** | ✅ Complete | Save/unsave queries to favorites (localStorage) |
-| **SQL Display** | ✅ Complete | Collapsible SQL query panel with copy functionality |
-| **Dark Mode** | 🙈 Hidden | Implemented but temporarily hidden from UI |
-| **Error Display** | ✅ Partial | Basic error messages shown; graceful handling in progress |
+- Type a question (up to 1,000 characters) and press **Send** or
+  **Ctrl/Cmd + Enter**.
+- Each answer card shows:
+  - **Analysis**: what was done, how many rows came back, how long it took,
+    and (in multi-agent mode) a written answer with key findings.
+  - **SQL Query**: collapsible, with a copy button.
+  - **Visualization**: the chart or table, with export buttons.
+- A status indicator in the header shows whether the backend is ready. The
+  input stays disabled until it is; while the backend starts, the app retries
+  every 5 seconds and explains what is missing if the backend reports a
+  configuration problem.
 
-### Upcoming Features (Phase 5+)
+### Two pipelines
 
-- **Query Builder**: Visual query construction interface (currently in testing)
-- **Query Result Export**: Export to CSV, JSON, Parquet
-- **Advanced Caching**: Query result caching to reduce API calls
-- **Rate Limiting**: Protect against excessive API usage
-- **Authentication**: User accounts and access control
-- **Cost Tracking**: Real-time API cost monitoring and budgeting
-- **Query Analytics**: Usage patterns and performance metrics
-- **Mobile Responsive**: Optimize for mobile devices
-- **Advanced Error Recovery**: Automatic query retry and optimization
+**Simple pipeline** (`backend/agents/simplified_pipeline.py`, the default):
+
+1. One LLM call writes the SQL from the schema, join hints and BigQuery rules.
+2. The SQL passes the read-only guard and runs in BigQuery.
+3. If BigQuery rejects it, the error is sent back to the model, which fixes the
+   query (up to 2 fixes).
+
+**Multi-agent pipeline** (`backend/agents/data_crew.py`, a CrewAI Flow):
+
+1. **Planner agent** interprets the question: which tables, filters, measures
+   and chart fit. It declines questions the data can't answer (for example,
+   weather) and suggests related questions it *can* answer.
+2. **SQL developer agent** writes the query from the plan.
+3. **Checks (code, not an agent)**: the read-only guard and a free BigQuery dry
+   run validate the query before anything is executed. Any error goes back to
+   the SQL developer with the exact message (up to 2 fixes).
+4. **Execution (code)** runs the query.
+5. **Analyst agent** reads the actual result rows and writes a direct answer,
+   2–4 findings and 3 follow-up questions. Click a follow-up to put it in the
+   input box.
+
+Every agent returns structured output (Pydantic models), and agents never
+delegate to each other: the Flow decides what runs next, which keeps cost and
+latency bounded. Your pipeline choice is remembered in the browser. The server
+default is set with `PIPELINE_MODE`.
+
+### Automatic visualization
+
+The chart type is chosen from the shape of the result:
+
+| Result shape | Visualization |
+|---|---|
+| A date column + a numeric column (≤ 100 rows) | Line chart |
+| A text column + a numeric column (≤ 30 rows) | Bar chart; horizontal when there are more than 6 bars or long labels, so every label stays readable |
+| Two numeric columns (e.g. year + revenue) | Line chart |
+| Anything else (one value, 4+ columns, many rows) | Table (first 100 rows shown) |
+
+In multi-agent mode the planner can refine this: **pie** for "share of" questions
+(up to 8 non-negative slices) or **table** for detailed listings. Charts have
+hover tooltips and formatted numbers. Tables right-align numbers and show
+missing values as "—".
+
+### Safety and cost controls
+
+- **Read-only guard**: generated SQL must be a single `SELECT`/`WITH` statement.
+  `INSERT`, `DELETE`, `DROP`, scripts and multiple statements are rejected before
+  reaching BigQuery (string literals and comments are ignored when checking).
+- **Byte cap**: every query has a BigQuery `maximum_bytes_billed` limit
+  (`BQ_MAX_BYTES_BILLED`, 10 GB by default); larger queries fail instead of
+  running.
+- **Row cap**: at most `BQ_MAX_RESULTS_ROWS` rows (1,000) are downloaded per
+  query; the UI says when a result was truncated.
+- **Timeouts**: BigQuery 30 s, LLM calls 30–60 s, the multi-agent flow 110 s,
+  the browser 120 s.
+- **Clean error messages**: errors shown in the UI and sent to the LLM are
+  scrubbed of your GCP project ID, service account emails, API keys and
+  request URLs. Full errors stay in the server log.
+- **Least privilege**: the service account only needs permission to run
+  queries (see [Getting Started](#2-set-up-google-cloud)).
+
+### Workspace
+
+All of this is stored in your browser (`localStorage`); nothing is saved on
+the server.
+
+- **Conversation**: the last 100 messages survive page reloads. Download the
+  conversation as JSON, or clear it (the clear is permanent).
+- **Export**: download any result as **CSV** or **JSON**, or copy it to the
+  clipboard as JSON. Copy the SQL from its panel.
+- **History panel** (clock icon): every question you send is recorded
+  automatically (the last 20, plus favorites). Search it, copy a question, star
+  it, or click it to put it back in the input box.
+- **Favorites panel** (star icon): star an answer to save its question, add
+  tags to it, then search favorites or filter them by tag (up to 50).
+- **Analytics panel** (chart icon): total and unique questions, success rate,
+  average response time, questions per day over the last week, and which SQL
+  features (JOIN, WHERE, GROUP BY, ORDER BY, CTEs) the generated queries used.
+- **Query Builder** (sliders icon, *in testing*): write a base question, add
+  typed parameters (text, number, date, true/false) or quick templates (limit,
+  offset, start/end date, include metrics), preview the result, and apply it.
+  It produces a plain-language question such as
+  *"Top 10 brands by revenue (limit: 10, start date: 2024-01-01)"*.
+- **Dark mode**: follows your system setting until you toggle it in the header;
+  the choice is remembered.
+- **Copy feedback**: copy buttons in History and Favorites confirm with a short
+  "Copied!" animation (or "Failed" if the browser blocks clipboard access).
+
+**Keyboard shortcuts**
+
+| Shortcut | Action |
+|---|---|
+| Ctrl/Cmd + Enter | Send the question |
+| Ctrl/Cmd + K | Focus the question input |
+| Escape | Close the open sidebar panel |
+
+### Error messages
+
+Errors are grouped into types, each with a plain-language explanation,
+suggestions, and collapsible technical details: SQL errors (with specific hints
+for unknown columns and unsupported date functions), unavailable OpenAI model,
+OpenAI authentication, rate limits, Google Cloud authentication, and connection
+problems.
 
 ---
 
-## 📋 Prerequisites
+## 🏗️ How It Works
 
-### System Requirements
-- **OS**: Windows, macOS, or Linux
-- **RAM**: 4GB minimum (8GB recommended)
-- **Disk Space**: 5GB minimum for Docker images
+### Architecture
 
-### Required Software
-- **Docker Desktop** (v20.10+) - [Install here](https://www.docker.com/products/docker-desktop)
-- **Git** - [Install here](https://git-scm.com/downloads)
-- **Node.js** (v18+) - Only needed for local frontend development
-- **Python** (v3.11+) - Only needed for local backend development
+```mermaid
+flowchart LR
+    UI["Browser: Next.js UI on :3000"] -->|"POST /api/chat"| API["FastAPI backend on :8000"]
+    API --> SIMPLE["Simple pipeline: one LLM call"]
+    API --> CREW["Multi-agent pipeline: CrewAI Flow"]
+    SIMPLE --> LLM["OpenAI API"]
+    CREW --> LLM
+    SIMPLE --> GUARD["Read-only guard, dry run, byte cap"]
+    CREW --> GUARD
+    GUARD --> BQ[("BigQuery: thelook_ecommerce")]
+    BQ --> CHART["Chart selection"]
+    CHART -->|"JSON: SQL, chart, analysis"| UI
+```
 
-### Required Accounts & Keys
-- **Google Cloud Platform (GCP)**
-  - Active GCP Project
-  - Service Account with BigQuery permissions
-  - Service account JSON key file
+The browser talks to the backend directly, so the backend must be reachable at
+the URL baked into the frontend (`NEXT_PUBLIC_API_URL`, `http://localhost:8000`
+by default). Both pipelines share one module, `backend/agents/common.py`,
+containing the SQL rules given to the model, the read-only guard, SQL
+extraction and chart selection, so their safety rules can't drift apart.
 
-- **OpenAI**
-  - API key with GPT-4o access (or equivalent model)
-  - Sufficient API quota and credits
+### Multi-agent flow
 
-### Cost Considerations (Important ⚠️)
+```mermaid
+flowchart TD
+    Q(["Question"]) --> PLAN["Planner agent"]
+    PLAN -->|"not answerable"| NA(["Explanation and alternative questions"])
+    PLAN -->|"plan ready"| SQL["SQL developer agent"]
+    SQL --> CHECK{"Read-only guard and BigQuery dry run"}
+    CHECK -->|"error, attempts left"| SQL
+    CHECK -->|"valid"| EXEC["Execute in BigQuery"]
+    EXEC -->|"SQL error, attempts left"| SQL
+    EXEC -->|"rows"| ANALYST["Analyst agent"]
+    ANALYST --> ANSWER(["Answer, insights, follow-ups, chart"])
+    CHECK -->|"out of attempts"| ERR(["Error"])
+    EXEC -->|"out of attempts or other error"| ERR
+```
 
-This POC uses **shared public data** to minimize BigQuery costs:
-- Uses `bigquery-public-data.thelook_ecommerce` (free public dataset)
-- No data ingestion costs
-- Query costs: ~$0.01-$0.10 per query (typical)
+Why the original crew was rebuilt this way is documented in
+[`dev_docs/CREWAI_PIPELINE_REVIEW.md`](dev_docs/CREWAI_PIPELINE_REVIEW.md).
 
-**Estimated Monthly Cost (Portfolio Use)**:
-- BigQuery: $2-5 (low query volume)
-- OpenAI API: $5-10 (GPT-4o, ~200 queries/month)
-- **Total**: ~$7-15/month
+### Dataset
 
-**Cost Optimization Strategies Used in This POC**:
-- Using public dataset (no ingestion costs)
-- Query result caching (not yet fully implemented)
-- Limiting results to 1000 rows per query
-- Temperature/token limits for LLM calls
-- Using more affordable models (can switch to GPT-4-turbo)
+Queries run against `bigquery-public-data.thelook_ecommerce`, a synthetic
+e-commerce dataset maintained by Google:
+
+| Table | Rows (approx.) | Contents |
+|---|---|---|
+| `orders` | 125k | One row per order: status, timestamps, item count, customer gender |
+| `order_items` | 182k | One row per item sold: product, sale price, status, timestamps |
+| `products` | 29k | Category, brand, department, cost, retail price |
+| `users` | 100k | Demographics, location, acquisition channel |
+
+Status values are `Processing`, `Shipped`, `Complete`, `Returned` and
+`Cancelled`. The dataset is regenerated continuously and contains some rows
+dated slightly in the future, which the SQL rules account for. The column list
+given to the model lives in `backend/schemas/bigquery_schema.py` and was
+verified against the live tables.
 
 ---
 
-## 🚀 Quick Start
+## 🧰 Tech Stack
 
-### Option 1: Using Docker (Recommended)
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 16 (App Router, Turbopack), React 19, TypeScript 5, Tailwind CSS 4, Recharts 3, Zustand 5, Axios, Lucide icons |
+| Backend | Python 3.11–3.13, FastAPI, Uvicorn, Pydantic 2 / pydantic-settings |
+| AI | OpenAI (`gpt-4o-mini` by default) via LangChain (simple pipeline) and CrewAI 1.15 Flows (multi-agent pipeline) |
+| Data | Google BigQuery (`google-cloud-bigquery`) |
+| Tooling | Docker & Docker Compose, pytest, ESLint |
 
-**1. Clone the Repository**
+Backend versions are pinned in `backend/requirements.txt`; frontend versions in
+`frontend/package-lock.json`.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+**Accounts**
+
+- A **Google Cloud** project with the BigQuery API enabled. Querying this
+  dataset fits comfortably in BigQuery's free tier (the first 1 TiB of query
+  processing per month is free).
+- An **OpenAI** API key with access to the model you configure
+  (`gpt-4o-mini` by default) and some credit on the account.
+
+**Software**
+
+- **Option A (recommended): Docker Desktop** (or Docker Engine with Compose v2)
+  and Git.
+- **Option B (no Docker):** Python 3.11–3.13, Node.js 20.9+ (24 recommended)
+  and Git.
+
+### 1. Clone the repository
+
 ```bash
 git clone https://github.com/lnitc/text-to-sql.git
 cd text-to-sql
 ```
 
-**2. Create GCP Service Account**
+### 2. Set up Google Cloud
+
+The app needs a service account that may **run BigQuery queries** in your
+project. The public dataset is readable by any authenticated Google account,
+so the BigQuery Job User role is enough; add BigQuery Data Viewer only if you
+point the app at your own datasets.
+
+**With the `gcloud` CLI** (replace `YOUR_PROJECT_ID`):
+
 ```bash
-# Go to Google Cloud Console > Service Accounts
-# Create new service account
-# Grant only "BigQuery Job User" + "BigQuery Data Viewer" (least privilege:
-# the app only reads data; avoid "BigQuery Admin")
-# Create JSON key and download as gcp-key.json
-# Place gcp-key.json in project root
+gcloud config set project YOUR_PROJECT_ID
+gcloud services enable bigquery.googleapis.com
+
+gcloud iam service-accounts create text-to-sql-sa --display-name="Text-to-SQL app"
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+  --member="serviceAccount:text-to-sql-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/bigquery.jobUser"
+
+# Creates gcp-key.json in the current directory (the project root)
+gcloud iam service-accounts keys create gcp-key.json \
+  --iam-account=text-to-sql-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com
 ```
 
-**3. Configure Environment**
+**Or in the Cloud Console:** IAM & Admin → Service Accounts → *Create service
+account* → grant **BigQuery Job User** → open the account → *Keys* → *Add key*
+→ JSON. Save the file as `gcp-key.json` in the project root.
+
+`gcp-key.json` is gitignored. Never commit it.
+
+> **Key creation blocked?** Some organizations disable service account keys
+> (`iam.disableServiceAccountKeyCreation`). For running the backend locally
+> without Docker you can use your own Google credentials instead: run
+> `gcloud auth application-default login`, leave `GOOGLE_APPLICATION_CREDENTIALS`
+> empty in `.env`, and don't create `gcp-key.json`. The Docker setup expects a
+> key file.
+
+### 3. Get an OpenAI API key
+
+Create a key at <https://platform.openai.com/api-keys>. While you're there, set a
+monthly budget and usage limits for the project under billing settings; the app
+itself doesn't track spending.
+
+### 4. Configure environment variables
+
 ```bash
-# Copy template
 cp .env.example .env
-
-# Edit .env with your credentials
-# OPENAI_API_KEY=sk-proj-...
-# GCP_PROJECT_ID=your-project-id
 ```
 
-**4. Start Docker Containers**
+Edit `.env` and fill in at least:
+
+| Variable | Value |
+|---|---|
+| `OPENAI_API_KEY` | Your OpenAI key (`sk-...`) |
+| `GCP_PROJECT_ID` | Your Google Cloud project ID (queries are billed to it) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | `gcp-key.json` (relative to the project root). Docker Compose overrides this with the mounted path. |
+
+Everything else has working defaults; see the
+[Configuration Reference](#%EF%B8%8F-configuration-reference). `.env` is gitignored.
+
+### 5a. Run with Docker (recommended)
+
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-**5. Verify Services**
+The first build takes several minutes (it installs CrewAI and builds the
+frontend). Then:
+
+- App: <http://localhost:3000>
+- API docs (Swagger): <http://localhost:8000/docs>
+
+Useful commands:
+
 ```bash
-# Check containers are running
-docker compose ps
-
-# Test backend health
-curl http://localhost:8000/health
-
-# Access the application
-# Frontend: http://localhost:3000
-# Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
+docker compose ps                 # status and health
+docker compose logs -f backend    # backend logs
+docker compose down               # stop
+docker compose up -d --build      # rebuild after code or NEXT_PUBLIC_* changes
 ```
 
-**6. Test the Application**
-- Open http://localhost:3000 in your browser
-- Type a natural language question (e.g., "How many orders were placed last week?")
-- Watch the AI generate SQL, execute it, and render results!
+Both ports are published on `127.0.0.1` only, so other devices on your network
+can't reach the app.
 
-### Option 2: Local Development (Without Docker)
+### 5b. Run locally without Docker
 
-**Frontend**
+**Backend** (in one terminal):
+
+```bash
+cd backend
+python -m venv venv                  # keep the virtualenv inside backend/
+source venv/bin/activate             # Windows: venv\Scripts\activate
+pip install -r requirements-dev.txt  # runtime deps + pytest
+python -m uvicorn main:app --reload  # http://localhost:8000
+```
+
+The backend reads the root `.env` automatically. If the configured
+credentials path doesn't exist (for example the Docker path
+`/secrets/gcp-key.json`), it falls back to `gcp-key.json` in the project root.
+
+**Frontend** (in a second terminal):
+
 ```bash
 cd frontend
 npm install
-npm run dev
-# Runs on http://localhost:3000
+npm run dev                          # http://localhost:3000
 ```
 
-**Backend**
+The frontend calls `http://localhost:8000` by default. To use another backend
+URL, create `frontend/.env.local` with `NEXT_PUBLIC_API_URL=...`. In VS Code,
+select `backend/venv` as the Python interpreter rather than creating another
+environment at the project root.
+
+### 6. Verify
+
 ```bash
-cd backend
-python -m venv venv       # Keep the virtualenv in backend/ (excluded from Docker builds)
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements-dev.txt   # runtime deps + pytest; Docker uses requirements.txt
-python -m uvicorn main:app --reload
-# Runs on http://localhost:8000
+curl http://localhost:8000/health
+# {"status":"ok","message":"Settings validated successfully","version":"1.0.0","default_pipeline":"simple"}
 ```
 
-In VS Code, select `backend/venv` as the Python interpreter
-("Python: Select Interpreter") rather than creating another environment
-at the project root.
+Then open <http://localhost:3000>. The header should say **Backend Ready**. Try:
 
-**Environment Variables** (for local development)
+- *How many orders were placed in the last 7 days?* (single number → table)
+- *What were the top 5 product categories by revenue last month?* (bar chart)
+- *Show monthly revenue for 2024* (line chart)
+- *Which traffic sources bring the most users?* (bar chart)
+- With **Multi-agent analysis** on: *What share of users comes from each traffic
+  source?* (written findings, follow-ups, possibly a pie chart)
 
-No extra setup is needed: the backend reads the same `.env` file in the project
-root that Docker Compose uses (a `.env.local` there takes priority).
-`GOOGLE_APPLICATION_CREDENTIALS` may be a path relative to the project root
-(e.g. `gcp-key.json`). If the configured path doesn't exist, as with the Docker
-path `/secrets/gcp-key.json`, the backend falls back to `gcp-key.json` in the
-project root.
+If `status` is `degraded`, its `message` says what is missing.
 
 ---
 
-## 📖 Usage Guide
+## ⚙️ Configuration Reference
 
-### Basic Usage
+Settings come from environment variables first, then from `.env` /
+`.env.local` in the project root or `backend/`. Unknown variables are ignored.
+With Docker, only the variables listed under `backend.environment` in
+`docker-compose.yml` reach the container.
 
-1. **Open the Application**
-   - Navigate to http://localhost:3000
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | *(required)* | OpenAI API key |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Model for all LLM calls (e.g. `gpt-4o` for higher quality) |
+| `OPENAI_MAX_TOKENS` | `2000` | Max tokens per LLM response |
+| `GCP_PROJECT_ID` | *(required)* | Project that runs (and pays for) the queries |
+| `GOOGLE_APPLICATION_CREDENTIALS` | *(empty)* | Service account key path, relative to the project root or absolute. Empty means Application Default Credentials |
+| `PIPELINE_MODE` | `simple` | Default pipeline: `simple` or `crew`. The UI toggle overrides it per question |
+| `BQ_QUERY_TIMEOUT_SECONDS` | `30` | BigQuery execution timeout |
+| `BQ_MAX_RESULTS_ROWS` | `1000` | Max rows downloaded per query |
+| `BQ_MAX_BYTES_BILLED` | `10737418240` (10 GB) | Per-query scan limit; larger queries fail |
+| `CORS_ORIGINS` | `["http://localhost:3000", "http://127.0.0.1:3000", "http://frontend:3000"]` | Allowed browser origins, as a JSON list |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend URL **as seen from the browser**; built into the frontend, so rebuild after changing it |
+| `ENVIRONMENT` | `development` | `development`, `staging` or `production` (informational) |
+| `DEBUG` | `false` | Shows exception details in 500 responses and verbose CrewAI output |
+| `LOG_LEVEL` | `INFO` | Log level when started with `python main.py` |
+| `ENABLE_REQUEST_LOGGING` | `true` | Log each HTTP request with its duration |
+| `BACKEND_PORT` | `8000` | Port for `python main.py` and the API docs' server URL (Docker always uses 8000) |
+| `CREWAI_DISABLE_TELEMETRY` | `true` | CrewAI's anonymous telemetry is off unless you set this to `false` |
 
-2. **Ask a Question**
-   - Type a natural language question in the chat input
-   - Examples:
-     - "How many orders were placed in the last 7 days?"
-     - "What were the top 5 product categories by revenue?"
-     - "Show me the distribution of orders by month"
-
-3. **View Results**
-   - AI generates and executes SQL query
-   - Results displayed with visualization (chart or table)
-   - SQL query available in collapsible panel
-
-4. **Save to Favorites**
-   - Click the star icon on a query to favorite it
-   - Favorites appear in the "Favorites" panel on the left
-
-5. **View History**
-   - All queries are saved in session history
-   - Click on previous queries to re-run them
-
-### Advanced Features
-
-**Collapsible SQL Query Panel**
-- Click "SQL Query" to expand/collapse
-- Copy button to copy SQL to clipboard
-- Useful for auditing or manual execution
-
-**Dark Mode** (currently hidden)
-- Toggle available in sidebar (can be re-enabled)
-
-**Query Modification**
-- Edit previous queries and re-submit
-- Try different variations to explore data
+To query **your own data**, describe your tables in
+`backend/schemas/bigquery_schema.py` (project, dataset, table and fields, and
+register them in `SCHEMAS`), update the join hints (`RELATIONSHIPS`) and any
+dataset-specific rules (`SQL_RULES`) in `backend/agents/common.py`, and grant the
+service account BigQuery Data Viewer on that dataset.
 
 ---
 
-## 🔧 Configuration
+## 🔌 API Reference
 
-### Environment Variables
+Interactive documentation is served at <http://localhost:8000/docs>.
 
-**Backend (.env)**
-```env
-# Pipeline: simple (default, one LLM call) or crew (CrewAI multi-agent flow)
-PIPELINE_MODE=simple
+| Method & path | Purpose |
+|---|---|
+| `GET /health` | Service status: `ok` or `degraded` with a reason, plus the default pipeline |
+| `POST /api/chat` | Answer a question |
+| `GET /` | API information |
 
-# OpenAI Configuration
-OPENAI_API_KEY=sk-proj-xxxxx
-OPENAI_MODEL=gpt-4o-mini         # default; cheapest. gpt-4o for higher quality
-OPENAI_MAX_TOKENS=2000
+**`POST /api/chat`**
 
-# GCP Configuration
-GOOGLE_APPLICATION_CREDENTIALS=gcp-key.json  # Local: file path
-                                             # Docker: /secrets/gcp-key.json
-GCP_PROJECT_ID=your-gcp-project-id
-
-# BigQuery Configuration
-BQ_QUERY_TIMEOUT_SECONDS=30
-BQ_MAX_RESULTS_ROWS=1000
-BQ_MAX_BYTES_BILLED=10737418240  # Per-query scan cap (10 GB)
-
-# Application Configuration
-ENVIRONMENT=development          # development, staging, production
-DEBUG=False
-LOG_LEVEL=INFO
+```json
+{ "user_query": "Revenue by department this year", "pipeline": "crew" }
 ```
 
-**Frontend (.env.local)**
-```env
-# Called from the browser, so use a host-reachable URL (also under Docker)
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_ENVIRONMENT=development
+`pipeline` is optional (`simple` or `crew`; defaults to `PIPELINE_MODE`).
+Response (values illustrative):
+
+```json
+{
+  "thought_process": "Women's products brought in $1.2M this year, ...",
+  "sql_query": "SELECT p.department, SUM(oi.sale_price) AS total_revenue FROM ...",
+  "chart": {
+    "chart_type": "bar",
+    "data": [{ "department": "Women", "total_revenue": 1203456.7 }, { "department": "Men", "total_revenue": 1110022.1 }],
+    "x_axis_key": "department",
+    "y_axis_key": "total_revenue",
+    "title": "total_revenue by department"
+  },
+  "execution_time_ms": 14210.5,
+  "pipeline": "crew",
+  "insights": ["Women's products lead by about 8%."],
+  "follow_up_questions": ["How does this compare to last year?"]
+}
 ```
 
-### Customizing the Data Source
+`insights` and `follow_up_questions` are empty for the simple pipeline. Errors
+use one format for every status code (400, 404, 422, 500, 503):
 
-To use your own BigQuery dataset instead of the public data:
-
-1. Describe your tables in `backend/schemas/bigquery_schema.py`: each table's
-   `project`, `dataset`, `table` and `fields` (name, type, description), and
-   register them in `SCHEMAS`. Both pipelines build their prompts from this file.
-
-2. Update the join hints (`RELATIONSHIPS`) and any dataset-specific rules in
-   `SQL_RULES` in `backend/agents/common.py`.
-
-3. Ensure your GCP service account has permissions:
-   - BigQuery Data Viewer (on the dataset)
-   - BigQuery Job User (on the project that runs the queries)
+```json
+{ "error": "ValidationError", "message": "user_query: String should have at most 1000 characters", "status_code": 422, "details": null }
+```
 
 ---
 
 ## 🧪 Testing
 
-### Manual Testing (In Progress)
+**Backend** (76 tests, a few seconds):
 
-The following test scenarios are currently being executed:
-
-- ✅ Basic query execution with different chart types
-- ✅ Error handling with invalid queries
-- ✅ Favorites add/remove functionality
-- ✅ Query history retention
-- ✅ Dark mode toggle (when enabled)
-- 🧪 Edge cases: Very large result sets, timeouts, API errors
-- 🧪 Performance: Response time measurements
-- 🧪 Cross-browser compatibility
-
-### Running Tests Locally
-
-**Backend Unit & API Tests**
 ```bash
 cd backend
 pip install -r requirements-dev.txt
 pytest
 ```
+
 The suite covers the read-only SQL guard, SQL extraction, chart selection,
-BigQuery result conversion and error sanitizing, the API endpoints, and the
-multi-agent flow's routing (planning, SQL retries, refusals). OpenAI and
-BigQuery are replaced by fakes, so it needs no credentials, makes no network
-calls and costs nothing.
+BigQuery value conversion and error sanitizing, every API endpoint (including
+that errors never leak the project ID or keys), and the multi-agent flow's
+routing: planning, dry-run and execution retries, refusals, and that write
+queries never execute. OpenAI and BigQuery are replaced by fakes, so the tests
+need no credentials, make no network calls and cost nothing.
 
-**Manual API Checks** (against a running backend)
+**Frontend** (no automated tests yet; these checks catch type, lint and build
+errors):
+
 ```bash
-# Test health endpoint
-curl http://localhost:8000/health
-
-# Test chat API
-curl -X POST http://localhost:8000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"user_query": "How many orders were placed last week?"}'
+cd frontend
+npx tsc --noEmit
+npm run lint
+npm run build
 ```
 
-**Frontend Testing**
-- Open http://localhost:3000 in browser
-- Test with various query types
-- Check console for any JavaScript errors
+**Manual smoke test** after changes:
 
-### Example Test Queries
-
-1. **Simple Aggregation**
-   - Query: "How many orders were placed?"
-   - Expected: Single number result
-
-2. **Time-based Filtering**
-   - Query: "Show me orders from the last 30 days"
-   - Expected: Time-series or period comparison
-
-3. **Categorical Analysis**
-   - Query: "What are the top 5 product categories?"
-   - Expected: Bar chart with categories
-
-4. **Complex Filtering**
-   - Query: "Which users spent the most money in Q3?"
-   - Expected: Sorted table or top-N chart
+1. `/health` returns `ok` and the header shows **Backend Ready**.
+2. The example questions from [Verify](#6-verify) produce a table, bar chart
+   and line chart.
+3. With **Multi-agent analysis** on, an answer shows insights and clickable
+   follow-ups; *"What will the weather be tomorrow?"* is declined politely.
+4. Export CSV/JSON, copy SQL, star a question, find it in Favorites and
+   History, and check the Analytics panel.
+5. Toggle dark mode and reload: the theme and conversation persist.
 
 ---
 
@@ -467,17 +557,18 @@ text-to-sql/
 │   │   ├── api.ts                     # API client (Axios)
 │   │   ├── store.ts                   # Zustand store (messages, saved queries)
 │   │   ├── globals.css                # Tailwind CSS, dark-mode variant, animations
-│   │   ├── components/                # Favorites, History, Analytics, Query Builder
+│   │   ├── components/                # Favorites, History, Analytics, Query Builder, CopyButton
 │   │   ├── hooks/                     # Dark mode, saved queries, persistence, shortcuts
 │   │   └── utils/                     # Error parsing, CSV/JSON export
 │   ├── public/                        # Static assets
 │   ├── next.config.ts                 # Next.js configuration
+│   ├── AGENTS.md                      # Notes for AI coding agents on Next.js 16
 │   ├── package.json                   # Dependencies
 │   ├── Dockerfile                     # Multi-stage build (standalone server)
 │   └── .dockerignore
 │
 ├── backend/                           # FastAPI backend
-│   ├── main.py                        # FastAPI app & endpoints
+│   ├── main.py                        # FastAPI app, endpoints, error handling
 │   ├── config.py                      # Settings & validation
 │   ├── run.py                         # Uvicorn startup wrapper (Docker)
 │   ├── agents/
@@ -496,11 +587,13 @@ text-to-sql/
 │   ├── Dockerfile
 │   └── .dockerignore
 │
-├── dev_docs/                          # Development notes and reviews
+├── dev_docs/
+│   ├── development_story.md           # How the app was built, stage by stage
+│   └── CREWAI_PIPELINE_REVIEW.md      # Why the first multi-agent pipeline was rebuilt
 ├── docker-compose.yml                 # Docker Compose orchestration
 ├── .env.example                       # Environment template (copy to .env)
 ├── .env                               # Your settings (gitignored, never commit)
-├── gcp-key.json                       # GCP service account key (gitignored, never commit)
+├── gcp-key.json                       # Service account key (gitignored, never commit)
 └── README.md
 ```
 
@@ -508,408 +601,211 @@ text-to-sql/
 
 ## 🐛 Troubleshooting
 
-### Docker Issues
+**Header shows "Backend Error" / "Backend is not responding"**
+- Check the backend is up: `docker compose ps` or `curl http://localhost:8000/health`.
+  The backend takes a few seconds to start; the page retries every 5 seconds.
+- If you serve the frontend from a different address or port, add that origin
+  to `CORS_ORIGINS`.
+- If you changed `NEXT_PUBLIC_API_URL`, rebuild the frontend
+  (`docker compose up -d --build`): the value is fixed at build time. It must be
+  a URL the **browser** can reach (`http://localhost:8000`, not
+  `http://backend:8000`).
 
-**Problem**: Containers won't start
-```bash
-# Solution 1: Verify Docker is running
-docker ps
+**"Backend is running but not ready" / `/health` says `degraded`**
+- The message names the problem, e.g. `OPENAI_API_KEY is not set` or
+  `GCP credentials file not found`. Fix `.env` and restart the backend
+  (`docker compose up -d` recreates containers with the new values).
+- With Docker, `gcp-key.json` must exist in the project root before starting.
+  Otherwise Docker fails with a `mkdir` error or creates an empty *directory*
+  with that name; delete any such directory and add the real file.
 
-# Solution 2: Check for port conflicts
-lsof -i :3000    # macOS/Linux
-netstat -tuln | grep 3000  # Linux
-Get-NetTCPConnection -LocalPort 3000  # Windows (PowerShell)
+**Questions fail with "OpenAI Authentication Error" or "Model Unavailable"**
+- Check the key and that it has credit; check `OPENAI_MODEL` is a model your
+  account can use.
 
-# Solution 3: Rebuild from scratch
-docker compose down -v
-docker compose up -d --build
-```
+**Questions fail with "Access Denied" from BigQuery**
+- The service account needs BigQuery Job User on `GCP_PROJECT_ID`, and the
+  BigQuery API must be enabled in that project.
 
-**Problem**: "gcp-key.json: The system cannot find the path specified"
-```bash
-# On Windows, ensure:
-# 1. gcp-key.json exists in project root
-# 2. Docker Desktop has permission to mount volumes
-# 3. Restart Docker Desktop
-# 4. Use: docker compose down && docker compose up -d
-```
+**A question keeps producing SQL errors**
+- Both pipelines already retry with the error. Rephrase with explicit names
+  (*"revenue by product category"*), or try **Multi-agent analysis**, whose
+  planner handles vague questions better.
 
-### Backend Issues
+**The first multi-agent answer is slow**
+- Loading CrewAI adds about 9 seconds to the first multi-agent request after a
+  backend start. Set `PIPELINE_MODE=crew` to load it at startup instead.
 
-**Problem**: "Settings validation failed: GOOGLE_APPLICATION_CREDENTIALS is not set"
-```bash
-# Check .env file has:
-GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-key.json
-GCP_PROJECT_ID=your-actual-project-id
-
-# Check logs:
-docker compose logs backend
-```
-
-**Problem**: BigQuery query timeouts
-```bash
-# Increase timeout in .env:
-BQ_QUERY_TIMEOUT_SECONDS=60  # default is 30
-
-# Optimize query in the agent (reduce result set):
-BQ_MAX_RESULTS_ROWS=500  # default is 1000
-```
-
-**Problem**: OpenAI API errors
-```bash
-# Check API key format:
-# Should start with: sk-proj-
-# Should be in .env file
-
-# Check quota/credits:
-# Visit https://platform.openai.com/account/billing
-
-# Model deprecated error:
-# Update to gpt-4-turbo or gpt-4o in .env
-OPENAI_MODEL=gpt-4o
-```
-
-### Frontend Issues
-
-**Problem**: "No styling visible" / "Tailwind CSS not applied"
-```bash
-# Solution 1: Rebuild the Docker image (it runs its own `next build`)
-docker compose up -d --build
-
-# Solution 2: Clear Docker cache
-docker system prune -a
-docker compose up -d --build
-```
-
-**Problem**: API returns 503 Service Unavailable
-```bash
-# Check backend is running:
-docker compose ps
-
-# Check backend logs:
-docker compose logs backend -f
-
-# Test API directly:
-curl http://localhost:8000/health
-```
-
-**Problem**: CORS errors in browser console
-```bash
-# Ensure NEXT_PUBLIC_API_URL is correct in .env
-# For Docker: http://backend:8000
-# For local: http://localhost:8000
-
-# Backend has CORS configured for localhost:3000
-# Check in backend/main.py if using different port
-```
-
-### Data Issues
-
-**Problem**: "No data returned" or empty results
-```bash
-# Verify public dataset is accessible:
-# BigQuery Console > bigquery-public-data > thelook_ecommerce
-
-# Check tables exist:
-# Tables should include: order_items, products, users, events, inventory_items
-
-# Test query manually in BigQuery Console:
-SELECT COUNT(*) FROM `bigquery-public-data.thelook_ecommerce.order_items`
-```
+**Port 3000 or 8000 is already in use**
+- Stop the other process, or change the host side of the port mapping in
+  `docker-compose.yml` (and `NEXT_PUBLIC_API_URL` / `CORS_ORIGINS` to match).
 
 ---
 
-## 📊 Performance & Monitoring
+## 📊 Performance & Costs
 
-### Expected Response Times
+**Response times** (measured locally with `gpt-4o-mini`):
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Simple COUNT query | 2-3s | Including SQL generation |
-| Aggregation query | 3-5s | With GROUP BY |
-| JOIN query | 4-7s | Multiple tables |
-| Complex filtering | 2-4s | Depends on data volume |
+| Pipeline | Typical | Notes |
+|---|---|---|
+| Simple | 3–7 s | One LLM call plus the BigQuery query |
+| Multi-agent | 13–18 s | Three agent steps of about 4–7 s each |
+| Multi-agent, refusal | ~4 s | Only the planner runs |
 
-### Monitoring
+**Costs per question** (approximate, at the time of writing; check current
+[OpenAI](https://openai.com/api/pricing/) and
+[BigQuery](https://cloud.google.com/bigquery/pricing) pricing):
 
-**Backend Logs**
-```bash
-docker compose logs backend -f
-```
-
-**Frontend Console**
-- Open browser DevTools (F12)
-- Watch Network tab for API calls
-- Check Console for errors
-
-**BigQuery Console**
-- Visit https://console.cloud.google.com/bigquery
-- View query history and costs
-- Monitor slot usage
+- **OpenAI (`gpt-4o-mini`)**: about $0.0005 for the simple pipeline and a few
+  tenths of a cent for the multi-agent pipeline, which sends the schema to
+  three agents. Larger models cost proportionally more.
+- **BigQuery**: queries on this dataset scan a few MB to tens of MB, so normal
+  use stays within the free 1 TiB per month. `BQ_MAX_BYTES_BILLED` caps any
+  single query.
 
 ---
 
-## 🔐 Security Considerations
+## 🔐 Security & Deployment
 
-### Credentials Management
-- ✅ **DO**: Use `.env` for secrets (NOT COMMITTED)
-- ✅ **DO**: Rotate GCP service account keys periodically
-- ✅ **DO**: Limit service account to BigQuery permissions only
-- ❌ **DON'T**: Commit `gcp-key.json` to repository
-- ❌ **DON'T**: Commit `.env` with real credentials
-- ❌ **DON'T**: Share credentials in logs or error messages
+### Credentials
+- Keep secrets in `.env` and `gcp-key.json`; both are gitignored. Never commit them.
+- Give the service account only the roles it needs (BigQuery Job User; Data
+  Viewer only for your own datasets), and rotate keys periodically.
 
-### Backend Security
-- Input validation via Pydantic models
-- SQL injection mitigation (parameterized queries via BigQuery client)
-- CORS restricted to localhost:3000 (configurable)
-- Rate limiting not yet implemented (planned for Phase 5+)
+### Built-in protections
+- Request validation with Pydantic (question length 1–1,000 characters).
+- Generated SQL must be a single read-only `SELECT`/`WITH` query, is checked
+  with a BigQuery dry run in multi-agent mode, and is capped at
+  `BQ_MAX_BYTES_BILLED` bytes per query.
+- Error messages are scrubbed of the GCP project ID, service account emails,
+  API keys and request URLs before they reach the browser.
+- CORS restricted to the configured origins (`CORS_ORIGINS`).
+- Docker Compose publishes ports on `127.0.0.1` only. The frontend container
+  runs as an unprivileged user.
+- The browser stores only conversation history, saved questions and
+  preferences; no credentials.
+- **There is no authentication and no rate limiting.** See below.
 
-### GCP Service Account
-```json
-// Minimal permissions needed (Principle of Least Privilege):
-{
-  "roles": [
-    "roles/bigquery.dataViewer",        // Read data
-    "roles/bigquery.jobUser"            // Execute queries
-  ]
-}
-```
+### Deploying beyond your own machine
 
-### Frontend Security
-- No sensitive data stored in localStorage (only query history)
-- API calls use HTTPS in production
-- Content Security Policy (can be enhanced)
+Every question costs money (OpenAI tokens plus BigQuery scans), and the API has
+**no login and no rate limiting**. That is fine on your own computer. Before
+making the app reachable by anyone else:
 
----
-
-## 💡 Architecture Decisions
-
-### Why Two Pipelines?
-The backend ships two interchangeable pipelines with the same API contract,
-selected by `PIPELINE_MODE` or per request (the UI's "Multi-agent analysis" toggle):
-
-- **simple** (default, `agents/simplified_pipeline.py`): one LLM call writes the
-  SQL, with automatic correction if BigQuery rejects it. ~3 s per question.
-- **crew** (`agents/data_crew.py`): a CrewAI Flow with three agents:
-  - *Planner*: interprets the question and decides how to answer it (or that it can't be answered)
-  - *SQL developer*: writes the query and fixes it from dry-run/execution errors
-  - *Analyst*: writes the answer, insights and follow-up questions from the result rows
-
-  Validation, execution and chart selection are deterministic code steps shared
-  with the simple pipeline. ~13-25 s and roughly 5-10x the token cost per question.
-
-See `dev_docs/CREWAI_PIPELINE_REVIEW.md` for why the original crew was rebuilt.
-
-### Why BigQuery Public Data?
-- Free tier for portfolio projects
-- No data ingestion costs
-- Real-world eCommerce dataset for realistic queries
-- Demonstrates ability to work with production-grade systems
-
-### Why Next.js 16 + Turbopack?
-- Latest React framework with server components
-- Turbopack provides 5-10x faster builds
-- TypeScript out-of-the-box
-- App Router (modern routing)
-- Integrated with Vercel for easy deployment
-
-### Why FastAPI over Django/Flask?
-- Modern Python web framework (async/await support)
-- Automatic API documentation (Swagger UI)
-- Built-in validation (Pydantic)
-- High performance (uvicorn)
-- Type hints for better IDE support
-
-### Simplified Features (Cost Optimization)
-- ⏱️ Query result caching (planned but not implemented)
-- 💾 Database caching layer (using public data reduces need)
-- 🔄 Connection pooling (single-user POC)
-- 📊 Advanced analytics (query builder still in testing)
+1. **Require sign-in at the platform level.** For people using a browser,
+   put both services behind an authenticating proxy such as Google Cloud
+   Identity-Aware Proxy (IAP), and grant access only to the accounts that
+   should use the app. Protect the backend as well as the frontend: the
+   browser calls the backend directly (`NEXT_PUBLIC_API_URL`), so an open
+   backend URL can be used without ever loading the UI. (Cloud Run's
+   `--no-allow-unauthenticated` on its own suits service-to-service calls;
+   browsers don't attach the identity token it requires.)
+2. **Add rate limiting** if anyone besides you can reach the API: per-user or
+   per-IP limits in the app (e.g. [slowapi](https://github.com/laurentS/slowapi)
+   on `/api/chat`) or at the edge (API Gateway, Cloud Armor rate-based rules).
+3. **Cap spending at the source**: set a budget and usage limits on your OpenAI
+   project, set BigQuery custom quotas (query usage per day), and keep
+   `BQ_MAX_BYTES_BILLED` low.
+4. **Point the app at its real URLs**: set `CORS_ORIGINS` to the frontend's
+   origin as a JSON list (e.g. `CORS_ORIGINS='["https://app.example.com"]'`),
+   rebuild the frontend with `NEXT_PUBLIC_API_URL` set to the backend's URL,
+   and serve both over HTTPS.
+5. **Use a least-privilege service account**, and never bake `gcp-key.json`
+   into an image; on GCP, attach the service account to the service instead of
+   using a key file.
 
 ---
 
-## 🎯 Known Limitations & Future Work
+## 🚧 Known Limitations
 
-### Current Limitations
-1. **Single-user** - No authentication/multi-user support yet
-2. **Session-based** - No persistent query storage across sessions
-3. **Limited Error Recovery** - Some error states show raw API errors
-4. **No Result Caching** - Each query re-executes against BigQuery
-5. **Query Builder** - Visual query construction still in testing phase
-6. **Dark Mode** - Hidden from UI, needs theme persistence
-7. **Limited Visualizations** - Only Bar, Line, Pie, Table charts
-
-### Planned Features (Phase 5+)
-- [ ] User authentication and multi-user support
-- [ ] Persistent query database
-- [ ] Advanced query caching with invalidation
-- [ ] Query result export (CSV, Parquet, JSON)
-- [ ] Query Builder UI (currently in testing)
-- [ ] Real-time query cost estimation
-- [ ] Query performance recommendations
-- [ ] Multi-turn conversation context
-- [ ] Custom metric definitions
-- [ ] Advanced error recovery
-
-### Testing Status
-- ✅ Unit tests for core components (`backend/tests`)
-- ✅ API endpoint tests with fake pipelines
-- 🧪 End-to-end testing (in progress)
-- 🧪 Performance testing (in progress)
-- 🧪 Load testing (not started)
-- 🧪 Error scenario testing (in progress)
-
-### Python 3.11 Deprecation
-The backend uses Python 3.11, which will reach end-of-life on 2027-10-24.
-**Planned upgrade**: Python 3.12 (breaking change release, minor version bump)
+- **No conversation memory**: each question is answered independently, so
+  *"and last year?"* doesn't know what *"this year"* referred to. Clicking a
+  multi-agent follow-up suggestion works because those are full questions.
+- **One dataset, fixed schema**: the table list is hardcoded for
+  `thelook_ecommerce` (switching datasets means editing two files; see the
+  [Configuration Reference](#%EF%B8%8F-configuration-reference)).
+- **LLM accuracy**: the model can misread ambiguous questions or pick a
+  questionable definition (for example, which order statuses count as revenue).
+  Always check the SQL panel.
+- **Pie charts only in multi-agent mode** (chosen by the planner).
+- **Query Builder is basic**: it turns free-form parameters into text appended
+  to the question; it doesn't know the schema.
+- **Browser-only storage**: history, favorites and the conversation live in one
+  browser's `localStorage` and don't sync across devices.
+- **No authentication or rate limiting** (see
+  [Security & Deployment](#-security--deployment)).
+- **No automated frontend tests.**
+- **Backend Docker image uses Python 3.11**, which reaches end of life in
+  October 2027 (the code is tested on 3.13 locally).
 
 ---
 
-## 📈 Cost Analysis
+## 💡 Recommended for Implementation Features
 
-### Monthly Costs (Estimated)
+Ideas that would add the most value, roughly in priority order. None are
+implemented yet.
 
-**Google Cloud Platform**
-- BigQuery: $2-5 (depending on query volume)
-- Storage: $0 (using free public dataset)
-- Compute: $0 (no App Engine/Cloud Run)
-
-**OpenAI API**
-- GPT-4o: $5-10 (200 queries × ~$0.025-0.05 per query)
-- Alternative: GPT-4-turbo for $3-7 (cheaper)
-
-**Infrastructure**
-- Docker Desktop: Free (development)
-- Deployment: Varies ($5-50 on Cloud Run/App Engine)
-
-**Total**: $7-15/month for portfolio use
-
-### Cost Optimization Strategies
-1. ✅ Using free public BigQuery dataset
-2. ✅ Limiting results to 1000 rows per query
-3. ✅ Setting max tokens for LLM output
-4. ✅ Can switch to cheaper models (GPT-4-turbo)
-5. 🔄 Planned: Query result caching (reduces API calls)
-6. 🔄 Planned: Scheduled cleanup jobs
-7. 🔄 Planned: Cost alerts and budgeting
-
-### Cost Per Query Breakdown
-```
-Query Execution:
-- SQL Generation (GPT-4o): ~$0.01-0.03
-- BigQuery execution: ~$0.01-0.10 (depends on data size)
-- Result formatting: ~$0.001-0.01
-
-Total per query: ~$0.02-0.15 (average: ~$0.05)
-```
+1. **Authentication and rate limiting**: required before any shared deployment
+   (see [Deploying beyond your own machine](#deploying-beyond-your-own-machine)).
+2. **Accuracy evaluation set**: a fixed list of questions with known correct
+   answers, run against both pipelines to measure SQL accuracy whenever the
+   prompt, rules or model change. The most useful safeguard for a text-to-SQL
+   app.
+3. **Conversation context**: pass recent questions and SQL to the model so
+   follow-ups like *"and by month?"* work.
+4. **Streaming progress for the multi-agent pipeline**: show *planning → writing
+   SQL → analyzing* as it happens instead of one 15-second wait.
+5. **Cost preview**: use the dry run to show how much data a query will scan
+   before running it, and ask for confirmation above a threshold.
+6. **Result caching**: return cached answers for repeated questions (with a
+   time limit) to save time and money.
+7. **Dynamic schema discovery**: read table definitions from BigQuery's
+   `INFORMATION_SCHEMA` instead of a hardcoded file, enabling other datasets
+   without code changes.
+8. **Interactive charts**: let users switch chart type or axes, and export a
+   chart as an image.
+9. **Smarter Query Builder**: schema-aware filters (pick a table, column and
+   value) instead of free-text key/value pairs.
+10. **Frontend tests and CI**: component tests (Vitest + React Testing
+    Library), an end-to-end test (Playwright), and a GitHub Actions workflow
+    running pytest, lint, type check and both Docker builds on every push.
+11. **Usage and cost tracking**: record tokens and bytes per request and show
+    them in the Analytics panel.
+12. **Python 3.13 backend image** before Python 3.11's end of life.
+13. **Responsive layout**: collapse the sidebar on small screens.
 
 ---
 
 ## 🤝 Contributing
 
-This is a portfolio/POC project. Contributions and suggestions are welcome!
+Contributions and forks are welcome. A few conventions keep things working:
 
-### To Contribute
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- Run `pytest` in `backend/` and `npx tsc --noEmit && npm run lint` in
+  `frontend/` before committing; add tests for new backend behavior.
+- Keep SQL rules, the read-only guard and chart selection in
+  `backend/agents/common.py` so both pipelines stay consistent.
+- Change the model's view of the data in `backend/schemas/bigquery_schema.py`,
+  and verify column names against the real tables.
+- Remember that `NEXT_PUBLIC_*` values are fixed at build time.
+- Tailwind CSS 4's `dark:` variant is tied to the app's theme toggle (the
+  `.dark` class) in `frontend/app/globals.css`, not to the operating system.
+- Next.js 16 differs from older versions; `frontend/AGENTS.md` points AI coding
+  agents (and humans) to the bundled docs.
+- Never commit `.env`, `.env.local` or `gcp-key.json`.
 
-### Development Guidelines
-- Use TypeScript for frontend, Python type hints for backend
-- Follow existing code style and conventions
-- Add tests for new features
-- Update documentation for significant changes
+---
+
+## 📜 Development History
+
+[`dev_docs/development_story.md`](dev_docs/development_story.md) tells how the
+app was built, from the original plan through each phase, the bugs found along
+the way, and the lessons learned.
 
 ---
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
----
-
-## 📧 Support & Questions
-
-For questions, issues, or suggestions:
-- Open an issue on GitHub
-- Check existing documentation in project root
-- Review deployment guides (DOCKER_QUICK_START.md, PHASE_5_DEPLOYMENT_COMPLETE.md)
-
----
-
-## 🙏 Acknowledgments
-
-- **CrewAI** - Multi-agent orchestration framework
-- **FastAPI** - Modern Python web framework
-- **Next.js** - React framework with Turbopack bundler
-- **Google Cloud** - BigQuery and infrastructure
-- **OpenAI** - GPT-4o language model
-- **Recharts** - React charting library
-- **LangChain** - LLM integration tools
-
----
-
-## 📌 Quick Links
-
-- 📖 [Local Setup Guide](./DOCKER_QUICK_START.md)
-- 🚀 [Deployment Status](./PHASE_5_DEPLOYMENT_COMPLETE.md)
-- 🔧 [Environment Configuration](./.env.example)
-- 🐛 [Troubleshooting](#-troubleshooting)
-- 📊 [Cost Analysis](#-cost-analysis)
-
----
-
-## 🏷️ Project Status
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| **Backend** | ✅ Stable | FastAPI + CrewAI working reliably |
-| **Frontend** | ✅ Stable | Next.js 16 with Tailwind CSS |
-| **BigQuery Integration** | ✅ Stable | Queries execute successfully |
-| **Docker Deployment** | ✅ Stable | Both containers healthy |
-| **Error Handling** | 🟡 Partial | Basic errors shown, recovery in progress |
-| **Caching** | 🟡 Planned | Not yet implemented |
-| **Query Builder** | 🧪 Testing | Still in development |
-| **Testing** | 🧪 In Progress | Manual testing ongoing |
-| **Documentation** | ✅ Complete | README and guides available |
-| **Production Ready** | ❌ Not Yet | More testing and hardening needed |
-
----
-
-**Last Updated**: October 24, 2026  
-**POC Status**: Active Development - Testing in Progress  
-**Version**: 1.0.0-POC
-
----
-
-## Quick Start (TL;DR)
-
-```bash
-# 1. Clone
-git clone https://github.com/lnitc/text-to-sql.git
-cd text-to-sql
-
-# 2. Setup credentials
-# - Create GCP service account
-# - Download JSON key as gcp-key.json
-# - Get OpenAI API key
-# - Copy .env.example to .env and fill in values
-
-# 3. Start
-docker compose up -d
-
-# 4. Access
-# Frontend: http://localhost:3000
-# Backend: http://localhost:8000
-# Docs: http://localhost:8000/docs
-
-# 5. Test
-# Ask a question in the chat interface!
-```
-
----
-
-Made with ❤️ for portfolio | POC | Active Development
+This project has no formal license. Anyone is welcome to reuse, modify and
+share the code **at their own risk**: it is provided as is, without warranty of
+any kind, and the author is not responsible for any damage or costs (including
+cloud and API charges) resulting from its use.

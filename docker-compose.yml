@@ -21,7 +21,9 @@ services:
       dockerfile: Dockerfile
     container_name: text-to-sql-backend
     ports:
-      - "8000:8000"
+      # Published on 127.0.0.1 only: the API has no login, so keep it off the
+      # local network (the browser reaches it via localhost either way)
+      - "127.0.0.1:8000:8000"
     environment:
       # OpenAI Configuration
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -98,7 +100,7 @@ services:
         NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-development}
     container_name: text-to-sql-frontend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     # No source bind mount: the image runs its own production build. For
     # hot reload, run `npm run dev` in frontend/ instead.
 
@@ -150,9 +152,9 @@ networks:
 # NOTES FOR DEVELOPERS
 # ============================================================================
 # 1. Before running docker-compose:
-#    - Copy .env.example to .env.local
-#    - Fill in OPENAI_API_KEY, GCP_PROJECT_ID, GCP_KEY_PATH
-#    - Ensure gcp-key.json exists at the path specified in GCP_KEY_PATH
+#    - Copy .env.example to .env
+#    - Fill in OPENAI_API_KEY and GCP_PROJECT_ID
+#    - Place your service account key at ./gcp-key.json (mounted read-only)
 #
 # 2. Initial setup:
 #    docker-compose up --build

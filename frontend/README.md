@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend
 
-## Getting Started
+The Next.js 16 user interface for the Text-to-SQL Data Analyst. Setup,
+features and configuration are documented in the
+[main README](../README.md); this page covers frontend-only work.
 
-First, run the development server:
+## Development
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000, with hot reload
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The app calls the backend at `http://localhost:8000` by default. To use another
+URL, create `.env.local` here with `NEXT_PUBLIC_API_URL=...`. The value is
+built into the bundle, so restart `npm run dev` (or rebuild) after changing it.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Checks
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npx tsc --noEmit   # type check
+npm run lint       # ESLint
+npm run build      # production build
+```
 
-## Learn More
+There are no automated frontend tests yet.
 
-To learn more about Next.js, take a look at the following resources:
+## Where things live
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Path | Contents |
+|---|---|
+| `app/ChatInterface.tsx` | Page layout, chat input, sidebar panels, backend health check, pipeline toggle |
+| `app/ChatMessage.tsx` | One answer: analysis, insights, follow-ups, SQL panel, export buttons, errors |
+| `app/ChartRenderer.tsx` | Bar, line, pie and table rendering with Recharts |
+| `app/api.ts` | Axios client and API types |
+| `app/store.ts` | Zustand store for messages and saved queries |
+| `app/components/` | Favorites, History, Analytics, Query Builder, CopyButton |
+| `app/hooks/` | Dark mode, saved queries (favorites and history), message persistence, keyboard shortcuts |
+| `app/utils/` | Error parsing and suggestions, CSV/JSON export |
+| `app/globals.css` | Tailwind CSS, the class-based `dark:` variant, the `animate-pop` animation |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Notes
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Next.js 16** differs from older versions; read `AGENTS.md` and the docs
+  bundled in `node_modules/next/dist/docs/` before relying on older patterns.
+- **Dark mode:** Tailwind CSS 4 bases `dark:` on the operating-system setting by
+  default. `globals.css` redefines it to follow the `.dark` class that
+  `hooks/useDarkMode.ts` sets on `<html>`, so the in-app toggle works.
+- **Docker:** the image builds the app itself (`npm ci` + `next build` with
+  standalone output) and runs `node server.js`. `next.config.ts` enables
+  standalone output only when `NEXT_STANDALONE=true`, so local `npm start`
+  still works.

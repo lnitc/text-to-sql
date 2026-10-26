@@ -36,7 +36,7 @@ This note lists its main flaws and how the rebuilt pipeline addresses them.
 
 6. **No safety checks on generated SQL.** Whatever the agent wrote went straight to
    BigQuery. There was no read-only check, no byte cap, and no timeout around the
-   crew. The README's suggested "BigQuery Admin" role made this worse; see the
+   crew. The "BigQuery Admin" role the README suggested at the time made this worse; see the
    recommendation below.
 
 7. **Cost and latency had no limit.**
@@ -78,6 +78,7 @@ The simplified pipeline remains the default (`PIPELINE_MODE=simple`). The UI's
 
 ## Recommendation
 
-Give the service account **BigQuery Job User** + **BigQuery Data Viewer** instead of
-BigQuery Admin. The SQL guard is the first line of defense; least privilege should
-be the second.
+Give the service account **BigQuery Job User** instead of BigQuery Admin (add
+**BigQuery Data Viewer** only for your own datasets; the public dataset is
+readable by any authenticated account). The SQL guard is the first line of
+defense; least privilege should be the second.
