@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from langchain_openai import ChatOpenAI
 
 
 BACKEND_DIR = Path(__file__).resolve().parent
@@ -31,7 +30,6 @@ class Settings(BaseSettings):
     # ========================================================================
     # CORS Configuration (for Next.js frontend)
     # ========================================================================
-    frontend_url: str = "http://localhost:3000"
     cors_origins: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -57,17 +55,13 @@ class Settings(BaseSettings):
     # and report what is missing via /health instead of crashing on import.
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    openai_temperature: float = 0.7
     openai_max_tokens: int = 2000
-    openai_monthly_budget: float = 15.0
 
     # ========================================================================
     # Google Cloud Configuration
     # ========================================================================
     gcp_project_id: str = ""
     google_application_credentials: str = ""  # Path to GCP service account JSON
-    bq_dataset_project: str = "bigquery-public-data"
-    bq_dataset_id: str = "thelook_ecommerce"
     bq_query_timeout_seconds: int = 30
     bq_max_results_rows: int = 1000
     # Hard cap on bytes a single query may scan (cost guard). 10 GB by default;
@@ -79,13 +73,6 @@ class Settings(BaseSettings):
     # ========================================================================
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     enable_request_logging: bool = True
-
-    # ========================================================================
-    # Caching Configuration
-    # ========================================================================
-    cache_enabled: bool = True
-    cache_ttl_seconds: int = 1800  # 30 minutes
-    cache_max_results: int = 10
 
     model_config = SettingsConfigDict(
         # Later files take priority; missing files are ignored. .env is the
@@ -99,22 +86,6 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",  # Ignore extra environment variables
     )
-
-    def get_llm(self):
-        """
-        Get configured LangChain ChatOpenAI instance for CrewAI.
-        
-        Returns:
-            ChatOpenAI instance configured with settings
-        """
-        return ChatOpenAI(
-            model=self.openai_model,
-            temperature=self.openai_temperature,
-            max_tokens=self.openai_max_tokens,
-            api_key=self.openai_api_key,
-            timeout=30,
-            max_retries=2,
-        )
 
     def resolved_credentials_path(self) -> str | None:
         """

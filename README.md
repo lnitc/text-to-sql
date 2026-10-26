@@ -271,7 +271,7 @@ npm run dev
 cd backend
 python -m venv venv       # Keep the virtualenv in backend/ (excluded from Docker builds)
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # runtime deps + pytest; Docker uses requirements.txt
 python -m uvicorn main:app --reload
 # Runs on http://localhost:8000
 ```
@@ -347,8 +347,6 @@ PIPELINE_MODE=simple
 OPENAI_API_KEY=sk-proj-xxxxx
 OPENAI_MODEL=gpt-4o-mini         # default; cheapest. gpt-4o for higher quality
 OPENAI_MAX_TOKENS=2000
-OPENAI_TEMPERATURE=0.7
-OPENAI_MONTHLY_BUDGET=15
 
 # GCP Configuration
 GOOGLE_APPLICATION_CREDENTIALS=gcp-key.json  # Local: file path
@@ -356,8 +354,6 @@ GOOGLE_APPLICATION_CREDENTIALS=gcp-key.json  # Local: file path
 GCP_PROJECT_ID=your-gcp-project-id
 
 # BigQuery Configuration
-BQ_DATASET_PROJECT=bigquery-public-data
-BQ_DATASET_ID=thelook_ecommerce
 BQ_QUERY_TIMEOUT_SECONDS=30
 BQ_MAX_RESULTS_ROWS=1000
 BQ_MAX_BYTES_BILLED=10737418240  # Per-query scan cap (10 GB)
@@ -379,23 +375,16 @@ NEXT_PUBLIC_ENVIRONMENT=development
 
 To use your own BigQuery dataset instead of the public data:
 
-1. Update `.env`:
-```env
-BQ_DATASET_PROJECT=your-project-id
-BQ_DATASET_ID=your-dataset-id
-```
+1. Describe your tables in `backend/schemas/bigquery_schema.py`: each table's
+   `project`, `dataset`, `table` and `fields` (name, type, description), and
+   register them in `SCHEMAS`. Both pipelines build their prompts from this file.
 
-2. Ensure your GCP service account has permissions:
-   - BigQuery Data Viewer
-   - BigQuery Job User
+2. Update the join hints (`RELATIONSHIPS`) and any dataset-specific rules in
+   `SQL_RULES` in `backend/agents/common.py`.
 
-3. Update the schema information in `backend/agents/data_crew.py`:
-```python
-# Update the SCHEMA_INFO variable with your table structures
-SCHEMA_INFO = """
-Your custom schema description here
-"""
-```
+3. Ensure your GCP service account has permissions:
+   - BigQuery Data Viewer (on the dataset)
+   - BigQuery Job User (on the project that runs the queries)
 
 ---
 
@@ -416,9 +405,20 @@ The following test scenarios are currently being executed:
 
 ### Running Tests Locally
 
-**Backend API Tests**
+**Backend Unit & API Tests**
 ```bash
 cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+The suite covers the read-only SQL guard, SQL extraction, chart selection,
+BigQuery result conversion and error sanitizing, the API endpoints, and the
+multi-agent flow's routing (planning, SQL retries, refusals). OpenAI and
+BigQuery are replaced by fakes, so it needs no credentials, makes no network
+calls and costs nothing.
+
+**Manual API Checks** (against a running backend)
+```bash
 # Test health endpoint
 curl http://localhost:8000/health
 
@@ -457,50 +457,51 @@ curl -X POST http://localhost:8000/api/chat \
 
 ```
 text-to-sql/
-├── frontend/                          # Next.js 16 Frontend Application
+├── frontend/                          # Next.js 16 frontend
 │   ├── app/
-│   │   ├── page.tsx                  # Main page
-│   │   ├── ChatInterface.tsx          # Chat UI component
-│   │   ├── ChatMessage.tsx            # Individual message component
-│   │   ├── ChartRenderer.tsx          # Dynamic chart rendering
+│   │   ├── page.tsx                   # Main page
+│   │   ├── layout.tsx                 # Root layout
+│   │   ├── ChatInterface.tsx          # Chat UI, sidebar panels, pipeline toggle
+│   │   ├── ChatMessage.tsx            # One answer: analysis, insights, SQL, chart
+│   │   ├── ChartRenderer.tsx          # Bar/line/pie/table rendering (Recharts)
 │   │   ├── api.ts                     # API client (Axios)
-│   │   ├── globals.css                # Tailwind CSS configuration
-│   │   └── layout.tsx                 # Root layout
-│   ├── components/
-│   │   ├── Sidebar.tsx                # Left sidebar (favorites, history)
-│   │   └── ThemeToggle.tsx            # Dark mode toggle
+│   │   ├── store.ts                   # Zustand store (messages, saved queries)
+│   │   ├── globals.css                # Tailwind CSS, dark-mode variant, animations
+│   │   ├── components/                # Favorites, History, Analytics, Query Builder
+│   │   ├── hooks/                     # Dark mode, saved queries, persistence, shortcuts
+│   │   └── utils/                     # Error parsing, CSV/JSON export
 │   ├── public/                        # Static assets
-│   ├── tailwind.config.ts             # Tailwind CSS configuration
-│   ├── next.config.ts                 # Next.js configuration (Turbopack)
-│   ├── tsconfig.json                  # TypeScript configuration
+│   ├── next.config.ts                 # Next.js configuration
 │   ├── package.json                   # Dependencies
-│   ├── Dockerfile                     # Docker image definition
-│   └── .dockerignore                  # Docker build ignore patterns
+│   ├── Dockerfile                     # Multi-stage build (standalone server)
+│   └── .dockerignore
 │
-├── backend/                           # FastAPI Backend Application
+├── backend/                           # FastAPI backend
 │   ├── main.py                        # FastAPI app & endpoints
-│   ├── config.py                      # Configuration & settings validation
+│   ├── config.py                      # Settings & validation
+│   ├── run.py                         # Uvicorn startup wrapper (Docker)
 │   ├── agents/
-│   │   ├── data_crew.py              # CrewAI agents definition
-│   │   └── simplified_pipeline.py    # Alternative pipeline implementation
+│   │   ├── common.py                  # SQL rules, read-only guard, chart selection
+│   │   ├── simplified_pipeline.py     # Default pipeline (one LLM call)
+│   │   └── data_crew.py               # CrewAI multi-agent Flow
 │   ├── tools/
-│   │   └── bigquery_tool.py          # BigQuery execution tool
-│   ├── models/
-│   │   └── schemas.py                # Pydantic schemas & models
-│   ├── requirements.txt               # Python dependencies
-│   ├── run.py                         # Uvicorn startup wrapper
-│   ├── Dockerfile                     # Docker image definition
-│   └── .dockerignore                  # Docker build ignore patterns
+│   │   └── bigquery_tool.py           # Query execution, dry runs, safe error messages
+│   ├── schemas/
+│   │   ├── bigquery_schema.py         # Table definitions given to the LLM
+│   │   └── models.py                  # Pydantic request/response models
+│   ├── tests/                         # pytest suite (no network or credentials needed)
+│   ├── requirements.txt               # Runtime dependencies (pinned)
+│   ├── requirements-dev.txt           # Runtime + test & formatting tools
+│   ├── pytest.ini
+│   ├── Dockerfile
+│   └── .dockerignore
 │
+├── dev_docs/                          # Development notes and reviews
 ├── docker-compose.yml                 # Docker Compose orchestration
-├── .env                               # Environment variables (DO NOT COMMIT)
-├── .env.example                       # Environment template
-├── .gitignore                         # Git ignore patterns
-├── gcp-key.json                       # GCP Service Account (DO NOT COMMIT)
-├── README.md                          # This file
-├── PHASE_5_DEPLOYMENT_COMPLETE.md     # Deployment status
-├── DOCKER_QUICK_START.md              # Docker quick reference
-└── LICENSE                            # MIT License
+├── .env.example                       # Environment template (copy to .env)
+├── .env                               # Your settings (gitignored, never commit)
+├── gcp-key.json                       # GCP service account key (gitignored, never commit)
+└── README.md
 ```
 
 ---
@@ -572,14 +573,10 @@ OPENAI_MODEL=gpt-4o
 
 **Problem**: "No styling visible" / "Tailwind CSS not applied"
 ```bash
-# Solution 1: Build locally first
-cd frontend
-npm run build
-
-# Solution 2: Rebuild Docker image
+# Solution 1: Rebuild the Docker image (it runs its own `next build`)
 docker compose up -d --build
 
-# Solution 3: Clear Docker cache
+# Solution 2: Clear Docker cache
 docker system prune -a
 docker compose up -d --build
 ```
@@ -756,8 +753,8 @@ See `dev_docs/CREWAI_PIPELINE_REVIEW.md` for why the original crew was rebuilt.
 - [ ] Advanced error recovery
 
 ### Testing Status
-- ✅ Unit tests for core components
-- ✅ Integration tests for API endpoints
+- ✅ Unit tests for core components (`backend/tests`)
+- ✅ API endpoint tests with fake pipelines
 - 🧪 End-to-end testing (in progress)
 - 🧪 Performance testing (in progress)
 - 🧪 Load testing (not started)

@@ -1,0 +1,13 @@
+# Development dependencies: runtime packages plus test and formatting tools.
+# Not installed in the Docker image.
+#   pip install -r requirements-dev.txt
+#   pytest
+-r requirements.txt
+
+# Testing (httpx powers FastAPI's TestClient)
+pytest==9.1.1
+httpx==0.28.1
+
+# Formatting
+black==26.10.1
+isort==9.0.2

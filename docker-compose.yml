@@ -25,18 +25,16 @@ services:
     environment:
       # OpenAI Configuration
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_MAX_TOKENS: ${OPENAI_MAX_TOKENS:-2000}
-      OPENAI_TEMPERATURE: ${OPENAI_TEMPERATURE:-0.7}
-      OPENAI_MONTHLY_BUDGET: ${OPENAI_MONTHLY_BUDGET:-15}
       
       # GCP Configuration
       # Must match the container path of the key mounted under volumes below
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-key.json
       GCP_PROJECT_ID: ${GCP_PROJECT_ID}
-      BQ_DATASET_PROJECT: ${BQ_DATASET_PROJECT:-bigquery-public-data}
-      BQ_DATASET_ID: ${BQ_DATASET_ID:-thelook_ecommerce}
       BQ_QUERY_TIMEOUT_SECONDS: ${BQ_QUERY_TIMEOUT_SECONDS:-30}
       BQ_MAX_RESULTS_ROWS: ${BQ_MAX_RESULTS_ROWS:-1000}
+      BQ_MAX_BYTES_BILLED: ${BQ_MAX_BYTES_BILLED:-10737418240}
       
       # Pipeline selection (simple | crew) and CrewAI telemetry opt-out
       PIPELINE_MODE: ${PIPELINE_MODE:-simple}
@@ -49,10 +47,6 @@ services:
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       ENABLE_REQUEST_LOGGING: ${ENABLE_REQUEST_LOGGING:-true}
-      
-      # Caching
-      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-1800}
-      CACHE_MAX_RESULTS: ${CACHE_MAX_RESULTS:-10}
     
     volumes:
       # Mount GCP service account key (read-only)
@@ -95,25 +89,19 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      # NEXT_PUBLIC_* values are inlined into the browser bundle at build
+      # time, so changing them requires `docker compose up --build`
+      args:
+        # Called from the user's browser, so it must be a host-reachable URL
+        # (the "backend" hostname only resolves inside the Docker network)
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-development}
     container_name: text-to-sql-frontend
     ports:
       - "3000:3000"
-    environment:
-      # API Configuration
-      # Called from the user's browser, so it must be a host-reachable URL
-      # (the "backend" hostname only resolves inside the Docker network)
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_ENVIRONMENT: ${NEXT_PUBLIC_ENVIRONMENT:-development}
-      # Next.js Configuration
-      NODE_ENV: ${ENVIRONMENT:-development}
-    
-    volumes:
-      # Mount source code for hot-reload during development
-      - ./frontend:/app
-      # Exclude node_modules and .next from sync
-      - /app/node_modules
-      - /app/.next
-    
+    # No source bind mount: the image runs its own production build. For
+    # hot reload, run `npm run dev` in frontend/ instead.
+
     networks:
       - app-network
     
@@ -124,7 +112,8 @@ services:
     
     # Health check
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      # The slim Node image has no curl, so use Node's built-in fetch
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3

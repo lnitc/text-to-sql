@@ -10,6 +10,11 @@ node_modules
 npm-debug.log
 yarn.lock
 
+# Build output (the image builds its own; a host build would pollute it)
+.next
+out
+next-env.d.ts
+
 # Environment Files (secrets should never be in image)
 .env
 .env.local

@@ -15,7 +15,7 @@ class ChatRequest(BaseModel):
         min_length=1,
         max_length=1000,
         description="Natural language question about the dataset",
-        example="What were the top 5 product categories by revenue last month?"
+        examples=["What were the top 5 product categories by revenue last month?"]
     )
 
     pipeline: Optional[Literal["simple", "crew"]] = Field(
@@ -46,28 +46,28 @@ class ChartData(BaseModel):
     data: list[dict] = Field(
         ...,
         description="Array of data points for the chart",
-        example=[
+        examples=[[
             {"category": "Electronics", "revenue": 5000},
             {"category": "Clothing", "revenue": 3500}
-        ]
+        ]]
     )
 
     x_axis_key: str = Field(
         ...,
         description="Key name for X-axis values",
-        example="category"
+        examples=["category"]
     )
 
     y_axis_key: str = Field(
         ...,
         description="Key name for Y-axis values",
-        example="revenue"
+        examples=["revenue"]
     )
 
     title: str = Field(
         ...,
         description="Chart title",
-        example="Revenue by Category"
+        examples=["Revenue by Category"]
     )
 
 
@@ -77,13 +77,13 @@ class AgentResponse(BaseModel):
     thought_process: str = Field(
         ...,
         description="Brief explanation of what was found and how",
-        example="The user asked for top 5 product categories by revenue..."
+        examples=["The user asked for top 5 product categories by revenue..."]
     )
 
     sql_query: str = Field(
         ...,
         description="The SQL query that was executed",
-        example="SELECT category, SUM(sale_price) as revenue FROM..."
+        examples=["SELECT category, SUM(sale_price) as revenue FROM..."]
     )
 
     chart: ChartData = Field(
