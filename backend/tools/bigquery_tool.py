@@ -12,11 +12,39 @@ from typing import Optional, Any
 import base64
 import datetime
 import decimal
+import re
 from google.cloud import bigquery
 from google.cloud.exceptions import GoogleCloudError, BadRequest
 import logging
 
 logger = logging.getLogger(__name__)
+
+_REQUEST_URL_RE = re.compile(r"(?:(?:GET|POST|PUT|PATCH|DELETE) )?https?://\S+")
+_JOB_DETAILS_RE = re.compile(r"^\s*(?:Location|Job ID):.*$", re.MULTILINE)
+_SERVICE_ACCOUNT_RE = re.compile(r"[\w.+-]+@[\w-]+\.iam\.gserviceaccount\.com")
+
+
+def safe_error_message(error: Exception, project_id: str = "") -> str:
+    """
+    Describe a BigQuery/Google API error without identifying details.
+
+    Error text is shown to users and sent to the LLM, but str(error) embeds
+    the request URL (which contains the GCP project ID), job IDs and, for
+    permission errors, the service account email. Full errors are still
+    logged server-side.
+    """
+    # Structured errors carry just the human-readable reason
+    errors = getattr(error, "errors", None) or []
+    message = errors[0].get("message") if errors and isinstance(errors[0], dict) else None
+    if not message:
+        message = getattr(error, "message", None) or str(error)
+
+    message = _REQUEST_URL_RE.sub("", message)
+    message = _JOB_DETAILS_RE.sub("", message)
+    message = _SERVICE_ACCOUNT_RE.sub("<service-account>", message)
+    if project_id:
+        message = message.replace(project_id, "<project>")
+    return " ".join(message.split()).lstrip(": ")
 
 
 def _to_json_value(value: Any) -> Any:
@@ -188,11 +216,11 @@ class BigQueryTool:
 
         except BadRequest as e:
             # SQL syntax or semantic errors
-            error_msg = str(e)
+            error_msg = safe_error_message(e, self.project_id)
             execution_time = (time.time() - start_time) * 1000
-            
-            logger.error(f"[BigQueryTool] SQL Error: {error_msg}")
-            
+
+            logger.error(f"[BigQueryTool] SQL Error: {e}")
+
             return {
                 "success": False,
                 "data": [],
@@ -221,9 +249,9 @@ class BigQueryTool:
         except GoogleCloudError as e:
             # GCP API errors
             execution_time = (time.time() - start_time) * 1000
-            error_msg = f"BigQuery API Error: {str(e)}"
-            
-            logger.error(f"[BigQueryTool] {error_msg}")
+            error_msg = f"BigQuery API Error: {safe_error_message(e, self.project_id)}"
+
+            logger.error(f"[BigQueryTool] BigQuery API Error: {e}")
             
             return {
                 "success": False,
@@ -237,9 +265,9 @@ class BigQueryTool:
         except Exception as e:
             # Unexpected errors
             execution_time = (time.time() - start_time) * 1000
-            error_msg = f"Unexpected Error: {type(e).__name__}: {str(e)}"
-            
-            logger.error(f"[BigQueryTool] {error_msg}")
+            error_msg = f"Unexpected Error: {type(e).__name__}: {safe_error_message(e, self.project_id)}"
+
+            logger.error(f"[BigQueryTool] Unexpected Error: {type(e).__name__}: {e}")
             
             return {
                 "success": False,
@@ -278,15 +306,13 @@ class BigQueryTool:
                 }
             return {"success": True, "bytes_processed": bytes_processed, "error": None}
         except BadRequest as e:
-            # e.message omits the request URL and job details, which only
-            # distract an LLM that has to fix the query
-            message = getattr(e, "message", None) or str(e)
+            message = safe_error_message(e, self.project_id)
             return {"success": False, "bytes_processed": 0, "error": f"SQL Error: {message}"}
         except Exception as e:
             return {
                 "success": False,
                 "bytes_processed": 0,
-                "error": f"Dry run failed: {type(e).__name__}: {e}",
+                "error": f"Dry run failed: {type(e).__name__}: {safe_error_message(e, self.project_id)}",
             }
 
     def get_table_schema(self, dataset_id: str, table_id: str) -> dict[str, Any]:
@@ -340,7 +366,7 @@ class BigQueryTool:
             return result
 
         except Exception as e:
-            error_msg = f"Failed to get schema: {str(e)}"
+            error_msg = f"Failed to get schema: {safe_error_message(e, self.project_id)}"
             logger.error(f"[BigQueryTool] {error_msg}")
             
             result = {
@@ -381,7 +407,7 @@ class BigQueryTool:
             }
 
         except Exception as e:
-            error_msg = f"Failed to list tables: {str(e)}"
+            error_msg = f"Failed to list tables: {safe_error_message(e, self.project_id)}"
             logger.error(f"[BigQueryTool] {error_msg}")
             
             return {

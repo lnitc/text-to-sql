@@ -63,7 +63,7 @@ Next.js Configuration:
 GCP INTEGRATION VERIFICATION
 ================================================================================
 
-GCP Project: data-eng-related-projects
+GCP Project: <your-gcp-project-id>
 BigQuery Dataset: bigquery-public-data.thelook_ecommerce
 Credentials File: ./gcp-key.json
 Credentials Mount: /secrets/gcp-key.json (read-only)

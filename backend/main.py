@@ -9,6 +9,7 @@ Provides HTTP endpoints:
 """
 
 import asyncio
+import re
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -41,6 +42,28 @@ from agents.simplified_pipeline import create_simplified_pipeline
 # CrewAI adds several seconds to startup.
 pipelines: dict[str, Any] = {}
 _crew_init_lock = asyncio.Lock()
+
+
+_SECRET_PATTERNS = [
+    (re.compile(r"[\w.+-]+@[\w-]+\.iam\.gserviceaccount\.com"), "<service-account>"),
+    (re.compile(r"\bsk-[A-Za-z0-9_*-]{6,}"), "<api-key>"),
+    (re.compile(r"https?://\S+"), "<url>"),
+]
+
+
+def redact_sensitive(text: str) -> str:
+    """
+    Last line of defense before error text reaches API clients: remove the
+    GCP project ID, service account emails, API keys and request URLs that
+    upstream libraries (BigQuery, OpenAI, CrewAI) may embed in messages.
+    """
+    # Patterns first: service account emails contain the project ID, and
+    # replacing it first would stop the email pattern from matching
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    if settings.gcp_project_id:
+        text = text.replace(settings.gcp_project_id, "<project>")
+    return text
 
 
 def _create_crew_pipeline():
@@ -322,7 +345,7 @@ async def chat(request: ChatRequest) -> AgentResponse:
             print(f"[Chat] Failed to initialize {pipeline_name} pipeline: {exc}")
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"The {pipeline_name} pipeline could not be initialized: {exc}",
+                detail=redact_sensitive(f"The {pipeline_name} pipeline could not be initialized: {exc}"),
             )
         if pipeline is None:
             raise HTTPException(
@@ -352,7 +375,7 @@ async def chat(request: ChatRequest) -> AgentResponse:
             
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg,
+                detail=redact_sensitive(error_msg),
             )
 
         # Build response
@@ -380,7 +403,7 @@ async def chat(request: ChatRequest) -> AgentResponse:
         print(f"Error processing query: {type(exc).__name__}: {str(exc)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error processing query: {str(exc)}",
+            detail=redact_sensitive(f"Error processing query: {str(exc)}"),
         )
 
 

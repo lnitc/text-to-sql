@@ -68,13 +68,13 @@ User: "How many orders were placed in the last 7 days?"
 │  └────────────────┬─────────────────────────────────────┘ │
 │                   │                                        │
 │  ┌────────────────▼─────────────────────────────────────┐ │
-│  │  CrewAI Agentic Pipeline                             │ │
-│  │  ├─ Agent 1: SQL Developer                           │ │
-│  │  │   └─ Generates BigQuery SQL queries               │ │
-│  │  ├─ Agent 2: Data Executor                           │ │
-│  │  │   └─ Executes SQL and handles errors              │ │
-│  │  └─ Agent 3: Presenter                               │ │
-│  │      └─ Formats results and chooses visualization    │ │
+│  │  Text-to-SQL Pipeline (PIPELINE_MODE)                │ │
+│  │  ├─ simple (default): one LLM call writes the SQL    │ │
+│  │  └─ crew: CrewAI Flow with three agents              │ │
+│  │      ├─ Planner: interprets the question             │ │
+│  │      ├─ SQL Developer: writes and fixes the query    │ │
+│  │      └─ Analyst: writes insights and follow-ups      │ │
+│  │  Shared: read-only SQL guard, dry run, chart choice  │ │
 │  └────────────────┬─────────────────────────────────────┘ │
 │                   │                                        │
 │  ┌────────────────▼─────────────────────────────────────┐ │
@@ -216,7 +216,8 @@ cd text-to-sql
 ```bash
 # Go to Google Cloud Console > Service Accounts
 # Create new service account
-# Grant "BigQuery Admin" role
+# Grant only "BigQuery Job User" + "BigQuery Data Viewer" (least privilege:
+# the app only reads data; avoid "BigQuery Admin")
 # Create JSON key and download as gcp-key.json
 # Place gcp-key.json in project root
 ```
@@ -344,7 +345,7 @@ PIPELINE_MODE=simple
 
 # OpenAI Configuration
 OPENAI_API_KEY=sk-proj-xxxxx
-OPENAI_MODEL=gpt-4o              # or gpt-4-turbo for cost savings
+OPENAI_MODEL=gpt-4o-mini         # default; cheapest. gpt-4o for higher quality
 OPENAI_MAX_TOKENS=2000
 OPENAI_TEMPERATURE=0.7
 OPENAI_MONTHLY_BUDGET=15
