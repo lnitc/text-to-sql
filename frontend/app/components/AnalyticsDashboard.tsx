@@ -9,11 +9,11 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
+  BarChart,
+  Bar,
+  LabelList,
 } from 'recharts';
-import { TrendingUp, BarChart3, Clock } from 'lucide-react';
+import { TrendingUp, BarChart3, Clock, CircleCheck } from 'lucide-react';
 import { useChatStore, Message, SavedQuery } from '../store';
 import { useFavorites } from '../hooks/useFavorites';
 
@@ -35,34 +35,29 @@ const StatCard: React.FC<{
   value: string | number;
   isDark: boolean;
 }> = ({ icon, label, value, isDark }) => (
+  // Cards are ~140px wide in the sidebar's two-column grid, so the value gets
+  // its own full-width line instead of sharing a row with the icon
   <div
-    className={`p-4 rounded-lg border ${
+    className={`p-3 rounded-lg border min-w-0 ${
       isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'
     }`}
   >
-    <div className="flex items-center gap-3">
-      <div
-        className={`p-2 rounded ${
-          isDark
-            ? 'bg-gray-800 text-blue-400'
-            : 'bg-blue-100 text-blue-600'
-        }`}
-      >
+    <div className="flex items-center gap-1.5 min-w-0">
+      <span className={`shrink-0 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
         {icon}
-      </div>
-      <div>
-        <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-          {label}
-        </p>
-        <p
-          className={`text-2xl font-bold ${
-            isDark ? 'text-white' : 'text-gray-900'
-          }`}
-        >
-          {value}
-        </p>
-      </div>
+      </span>
+      <p className={`text-xs truncate ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+        {label}
+      </p>
     </div>
+    <p
+      className={`mt-1 text-xl font-bold tabular-nums truncate ${
+        isDark ? 'text-white' : 'text-gray-900'
+      }`}
+      title={String(value)}
+    >
+      {value}
+    </p>
   </div>
 );
 
@@ -120,10 +115,9 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
       });
     });
 
-    const queryTypeData = Object.entries(queryKeywords).map(([type, count]) => ({
-      name: type,
-      value: count,
-    }));
+    const queryTypeData = Object.entries(queryKeywords)
+      .map(([type, count]) => ({ name: type, value: count }))
+      .sort((a, b) => b.value - a.value);
 
     const timings = responses
       .map((r) => r.execution_time_ms)
@@ -177,25 +171,25 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
         {/* Stats Grid */}
         <div className="grid grid-cols-2 gap-3">
           <StatCard
-            icon={<TrendingUp size={20} />}
+            icon={<TrendingUp size={16} />}
             label="Total Queries"
             value={analytics.totalQueries}
             isDark={isDark}
           />
           <StatCard
-            icon={<Clock size={20} />}
+            icon={<CircleCheck size={16} />}
             label="Success Rate"
             value={`${analytics.successRate}%`}
             isDark={isDark}
           />
           <StatCard
-            icon={<BarChart3 size={20} />}
+            icon={<BarChart3 size={16} />}
             label="Unique Queries"
             value={analytics.uniqueQueries}
             isDark={isDark}
           />
           <StatCard
-            icon={<Clock size={20} />}
+            icon={<Clock size={16} />}
             label="Avg Response"
             value={analytics.avgResponseTime}
             isDark={isDark}
@@ -254,7 +248,8 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
           </div>
         )}
 
-        {/* Query Keywords Distribution */}
+        {/* SQL features used in generated queries. A query can use several
+            features, so these counts aren't shares of a whole: bars, not a pie. */}
         {analytics.queryTypeData.length > 0 && (
           <div
             className={`p-4 rounded-lg border ${
@@ -270,27 +265,30 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
             >
               SQL Features Used
             </h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <PieChart>
-                <Pie
-                  data={analytics.queryTypeData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, value }) => `${name}: ${value}`}
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                  isAnimationActive={false}
-                >
-                  {analytics.queryTypeData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={chartColors[index % chartColors.length]}
-                    />
-                  ))}
-                </Pie>
+            <ResponsiveContainer
+              width="100%"
+              height={analytics.queryTypeData.length * 32 + 8}
+            >
+              <BarChart
+                data={analytics.queryTypeData}
+                layout="vertical"
+                margin={{ top: 0, right: 32, bottom: 0, left: 0 }}
+              >
+                {/* Counts are labeled at the bar ends, so no value axis */}
+                <XAxis type="number" hide allowDecimals={false} />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={84}
+                  interval={0}
+                  axisLine={false}
+                  tickLine={false}
+                  stroke={isDark ? '#9ca3af' : '#6b7280'}
+                  style={{ fontSize: '12px' }}
+                />
                 <Tooltip
+                  cursor={{ fill: isDark ? '#1f2937' : '#f3f4f6' }}
+                  formatter={(value) => [value, 'Queries']}
                   contentStyle={{
                     backgroundColor: isDark ? '#1f2937' : '#f9fafb',
                     border: `1px solid ${isDark ? '#374151' : '#e5e7eb'}`,
@@ -298,7 +296,21 @@ export const AnalyticsDashboard: React.FC<AnalyticsDashboardProps> = ({
                     color: isDark ? '#f3f4f6' : '#111827',
                   }}
                 />
-              </PieChart>
+                <Bar
+                  dataKey="value"
+                  fill={chartColors[0]}
+                  barSize={16}
+                  radius={[0, 4, 4, 0]}
+                  isAnimationActive={false}
+                >
+                  <LabelList
+                    dataKey="value"
+                    position="right"
+                    fill={isDark ? '#d1d5db' : '#374151'}
+                    fontSize={12}
+                  />
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         )}
