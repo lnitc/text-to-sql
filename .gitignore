@@ -69,9 +69,6 @@ htmlcov/
 .nyc_output/
 coverage/
 
-# Docker
-.dockerignore
-
 # OS
 Thumbs.db
 .DS_Store

@@ -268,21 +268,25 @@ npm run dev
 **Backend**
 ```bash
 cd backend
-python -m venv venv
+python -m venv venv       # Keep the virtualenv in backend/ (excluded from Docker builds)
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python -m uvicorn main:app --reload
 # Runs on http://localhost:8000
 ```
 
+In VS Code, select `backend/venv` as the Python interpreter
+("Python: Select Interpreter") rather than creating another environment
+at the project root.
+
 **Environment Variables** (for local development)
-```bash
-cd backend
-# Create .env.local or set environment variables
-export OPENAI_API_KEY=sk-proj-...
-export GCP_PROJECT_ID=your-project-id
-export GOOGLE_APPLICATION_CREDENTIALS=./gcp-key.json
-```
+
+No extra setup is needed: the backend reads the same `.env` file in the project
+root that Docker Compose uses (a `.env.local` there takes priority).
+`GOOGLE_APPLICATION_CREDENTIALS` may be a path relative to the project root
+(e.g. `gcp-key.json`). If the configured path doesn't exist, as with the Docker
+path `/secrets/gcp-key.json`, the backend falls back to `gcp-key.json` in the
+project root.
 
 ---
 
